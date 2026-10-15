@@ -825,6 +825,7 @@ model ExecutedRule {
   messageId     String
   status        ExecutedRuleStatus
   automated     Boolean
+  draftOnly     Boolean            @default(false)
   reason        String?
   matchMetadata Json? // Stores structured match information (e.g., learned patterns, match types)
 

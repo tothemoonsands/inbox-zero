@@ -64,7 +64,12 @@ const stateSchema = z.object({
   version: z.literal(1),
   initialized: z.boolean(),
   observations: observationStateSchema,
-  pendingArrivals: z.record(z.string(), observationSchema).default({}),
+  pendingArrivals: z
+    .record(
+      z.string(),
+      observationSchema.extend({ draftAttempted: z.boolean().optional() }),
+    )
+    .default({}),
   google: googleStateSchema,
   imap: imapStateSchema,
   learned: z.number(),

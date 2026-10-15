@@ -1,0 +1,1 @@
+ALTER TABLE "ExecutedRule" ADD COLUMN "draftOnly" BOOLEAN NOT NULL DEFAULT false;

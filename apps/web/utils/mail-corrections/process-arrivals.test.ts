@@ -119,7 +119,13 @@ it.each([
   });
   expect(filterSpam).toHaveBeenCalledOnce();
   expect(deferred).toEqual(enabled ? [observation.key] : []);
-  expect(runRulesForMessage).toHaveBeenCalledTimes(enabled ? 0 : 1);
+  expect(runRulesForMessage).toHaveBeenCalledOnce();
+  expect(runRulesForMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      draftOnly: enabled,
+      requireReadUnflagged: false,
+    }),
+  );
 });
 it("does not run filing rules after an arrival is moved to Junk", async () => {
   vi.mocked(filterSpam).mockResolvedValue({
@@ -229,7 +235,7 @@ it("keeps an unresolved arrival retryable instead of filtering partial content",
 it.each([
   ["INBOX", "UNREAD"],
   ["INBOX", "STARRED"],
-])("defers filing for protected mail: %j", async (...labels) => {
+])("drafts without filing protected mail: %j", async (...labels) => {
   mocks.getMessage.mockResolvedValue({
     ...getMockMessage({ labelIds: labels }),
     internalDate: "2000",
@@ -237,7 +243,9 @@ it.each([
   expect(
     await processObservedArrivals({ ...options, fileAfterReading: true }),
   ).toEqual([observation.key]);
-  expect(runRulesForMessage).not.toHaveBeenCalled();
+  expect(runRulesForMessage).toHaveBeenCalledWith(
+    expect.objectContaining({ draftOnly: true, requireReadUnflagged: false }),
+  );
 });
 it("keeps mail retryable when the live guard defers it during classification", async () => {
   vi.mocked(runRulesForMessage).mockRejectedValueOnce(

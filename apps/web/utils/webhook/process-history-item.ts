@@ -2,6 +2,8 @@ import { env } from "@/env";
 import {
   AutomaticFilingDeferredError,
   createFilingGuard,
+  createDraftGuard,
+  isReadyForFiling,
 } from "@/utils/mail-corrections/filing-eligibility";
 import { after } from "next/server";
 import { filterSpam } from "@/utils/spam/gate";
@@ -107,6 +109,7 @@ export async function processHistoryItem(
             emailAccountId,
             threadId: actualThreadId,
             messageId,
+            draftOnly: false,
           },
           select: { id: true },
         })
@@ -245,8 +248,12 @@ export async function processHistoryItem(
         where: { id: emailAccountId },
         select: { autoFileAfterReading: true },
       });
-      const beforeRuleExecution =
-        (filingSettings.autoFileAfterReading ?? env.AUTO_FILE_AFTER_READING)
+      const fileAfterReading =
+        filingSettings.autoFileAfterReading ?? env.AUTO_FILE_AFTER_READING;
+      const draftOnly = fileAfterReading && !isReadyForFiling(parsedMessage);
+      const beforeRuleExecution = draftOnly
+        ? createDraftGuard(provider, messageId)
+        : fileAfterReading
           ? createFilingGuard(provider, messageId)
           : undefined;
       await beforeRuleExecution?.();
@@ -254,6 +261,7 @@ export async function processHistoryItem(
         provider,
         message: parsedMessage,
         beforeRuleExecution,
+        draftOnly,
         rules,
         emailAccount,
         isTest: false,

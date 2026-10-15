@@ -65,10 +65,7 @@ export async function processObservedArrivals({
       const verdict = await filterSpam({ emailAccountId, message, provider });
       if (verdict?.spam) continue;
     }
-    if (fileAfterReading && !isReadyForFiling(message)) {
-      deferred.push(arrival.key);
-      continue;
-    }
+    const draftOnly = fileAfterReading && !isReadyForFiling(message);
     let results: Awaited<ReturnType<typeof runRulesForMessage>>;
     try {
       results = await runRulesForMessage({
@@ -81,7 +78,8 @@ export async function processObservedArrivals({
         isTest: false,
         rerun: false,
         requireInbox: true,
-        requireReadUnflagged: fileAfterReading,
+        requireReadUnflagged: fileAfterReading && !draftOnly,
+        draftOnly,
       });
     } catch (error) {
       if (!(error instanceof AutomaticFilingDeferredError)) throw error;
@@ -96,6 +94,7 @@ export async function processObservedArrivals({
       throw new Error(
         "Arrival classification did not complete; review the recorded action before retrying",
       );
+    if (draftOnly) deferred.push(arrival.key);
   }
   return deferred;
 }

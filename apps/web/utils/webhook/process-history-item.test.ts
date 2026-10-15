@@ -114,7 +114,7 @@ describe("Provider Edge Cases", () => {
     vi.mocked(prisma.emailAccount.findUniqueOrThrow).mockResolvedValueOnce({
       autoFileAfterReading: enabled,
     } as never);
-    if (!enabled) vi.mocked(runRules).mockResolvedValueOnce([]);
+    vi.mocked(runRules).mockResolvedValueOnce([]);
     const message = getMockParsedMessage({ labelIds: ["INBOX", "UNREAD"] });
     await processHistoryItem(
       { messageId: message.id, message },
@@ -127,14 +127,17 @@ describe("Provider Edge Cases", () => {
         }),
       },
     );
-    expect(runRules).toHaveBeenCalledTimes(enabled ? 0 : 1);
+    expect(runRules).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ draftOnly: enabled }),
+    );
   });
 
   it.each([
     ["INBOX", "UNREAD"],
     ["INBOX", "STARRED"],
-  ])("holds protected arrivals when read-first filing is enabled: %j", async (...labels) => {
+  ])("drafts protected arrivals when read-first filing is enabled: %j", async (...labels) => {
     vi.spyOn(env, "AUTO_FILE_AFTER_READING", "get").mockReturnValue(true);
+    vi.mocked(runRules).mockResolvedValueOnce([]);
     const message = getMockParsedMessage({ labelIds: labels });
     await processHistoryItem(
       { messageId: message.id, message },
@@ -147,7 +150,9 @@ describe("Provider Edge Cases", () => {
         }),
       },
     );
-    expect(runRules).not.toHaveBeenCalled();
+    expect(runRules).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ draftOnly: true }),
+    );
   });
 
   it("stops spam before categorization, rules, notifications, or attachment filing", async () => {

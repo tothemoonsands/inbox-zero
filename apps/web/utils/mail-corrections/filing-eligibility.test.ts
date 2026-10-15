@@ -1,5 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { createFilingGuard, isReadyForFiling } from "./filing-eligibility";
+import {
+  createDraftGuard,
+  createFilingGuard,
+  isReadyForFiling,
+} from "./filing-eligibility";
 import type { EmailProvider } from "@/utils/email/types";
 
 it.each([
@@ -49,4 +53,22 @@ it("allows a read, unflagged inbox message with no protected inbox siblings", as
   await expect(
     createFilingGuard(provider as unknown as EmailProvider, "message")(),
   ).resolves.toBeUndefined();
+});
+
+it("allows drafting unread and flagged mail without inspecting or changing the thread", async () => {
+  const provider = {
+    getMessage: vi
+      .fn()
+      .mockResolvedValue({ labelIds: ["INBOX", "UNREAD", "STARRED"] }),
+  };
+  await expect(
+    createDraftGuard(provider as unknown as EmailProvider, "message")(),
+  ).resolves.toBeUndefined();
+});
+
+it("stops drafting when mail has left Inbox during generation", async () => {
+  const provider = { getMessage: vi.fn().mockResolvedValue({ labelIds: [] }) };
+  await expect(
+    createDraftGuard(provider as unknown as EmailProvider, "message")(),
+  ).rejects.toThrow("Automatic filing deferred");
 });

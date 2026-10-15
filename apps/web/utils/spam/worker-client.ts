@@ -15,7 +15,7 @@ export async function processNewMailArrivals({
   observations: Observation[];
   previous: Record<string, Observation>;
   initialized: boolean;
-  pending: Record<string, Observation>;
+  pending: Record<string, Observation & { draftAttempted?: boolean }>;
   fileAfterReading?: boolean;
 }) {
   if (!initialized) return [];
@@ -31,12 +31,14 @@ export async function processNewMailArrivals({
       (fileAfterReading && ready(item) && !ready(previous[item.key])) ||
       pending[item.key]
     )
-      pending[item.key] = item;
+      pending[item.key] = pending[item.key]?.draftAttempted
+        ? { ...item, draftAttempted: true }
+        : item;
   }
   const arrivals = Object.values(pending);
   const errors: Error[] = [];
   for (const item of arrivals) {
-    if (fileAfterReading && !newKeys.has(item.key) && !ready(item)) continue;
+    if (fileAfterReading && item.draftAttempted && !ready(item)) continue;
     try {
       // Acknowledging each email separately keeps slow AI work from replaying a whole batch.
       const result = await dispatch({
@@ -45,7 +47,11 @@ export async function processNewMailArrivals({
         arrivals: [item],
         fileAfterReading,
       });
-      if (!result.deferred?.includes(item.key)) delete pending[item.key];
+      if (result.deferred?.includes(item.key)) {
+        pending[item.key] = { ...item, draftAttempted: true };
+      } else {
+        delete pending[item.key];
+      }
     } catch (error) {
       errors.push(error instanceof Error ? error : new Error(String(error)));
     }

@@ -14,7 +14,10 @@ import {
   RERUN_UPGRADE_MESSAGE,
 } from "@/utils/premium/rerun";
 import type { Logger } from "@/utils/logger";
-import { createFilingGuard } from "@/utils/mail-corrections/filing-eligibility";
+import {
+  createDraftGuard,
+  createFilingGuard,
+} from "@/utils/mail-corrections/filing-eligibility";
 
 export async function runRulesForMessage({
   emailAccountId,
@@ -28,6 +31,7 @@ export async function runRulesForMessage({
   skipDraftReplies,
   requireInbox,
   requireReadUnflagged,
+  draftOnly = false,
 }: RunRulesBody & {
   emailAccountId: string;
   userId: string;
@@ -35,6 +39,7 @@ export async function runRulesForMessage({
   logger: Logger;
   requireInbox?: boolean;
   requireReadUnflagged?: boolean;
+  draftOnly?: boolean;
 }): Promise<RunRulesResult[]> {
   const logger = ctxLogger.with({ messageId, threadId });
 
@@ -105,9 +110,11 @@ export async function runRulesForMessage({
   });
 
   if (requireInbox && !message.labelIds?.includes("INBOX")) return [];
-  const beforeRuleExecution = requireReadUnflagged
-    ? createFilingGuard(emailProvider, messageId)
-    : undefined;
+  const beforeRuleExecution = draftOnly
+    ? createDraftGuard(emailProvider, messageId)
+    : requireReadUnflagged
+      ? createFilingGuard(emailProvider, messageId)
+      : undefined;
   await beforeRuleExecution?.();
 
   const fetchExecutedRule = !isTest && !rerun;
@@ -119,6 +126,7 @@ export async function runRulesForMessage({
           emailAccountId,
           threadId,
           messageId,
+          draftOnly: false,
         },
         select: {
           id: true,
@@ -191,6 +199,8 @@ export async function runRulesForMessage({
     modelType: "chat",
     skipDraftReplies,
     beforeRuleExecution,
+    draftOnly,
+    rerun: rerun ?? false,
   }).catch((error) => {
     logger.error("runRules failed", { error });
     return flushAndRethrowRunRulesActionError({

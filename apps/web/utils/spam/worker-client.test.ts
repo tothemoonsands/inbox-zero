@@ -172,7 +172,9 @@ describe("filing after reading", () => {
       observations: [unread],
       previous: {},
     });
-    expect(pending).toEqual({ [unread.key]: unread });
+    expect(pending).toEqual({
+      [unread.key]: { ...unread, draftAttempted: true },
+    });
     const restored = JSON.parse(JSON.stringify(pending));
     await processNewMailArrivals({
       ...options,
@@ -193,6 +195,10 @@ describe("filing after reading", () => {
   it("holds read flagged messages until their flag is removed", async () => {
     const flagged = { ...read, isFlagged: true };
     const pending = { [flagged.key]: flagged };
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ deferred: [flagged.key] }),
+    });
     const options = {
       emailAccountId: "account",
       initialized: true,
@@ -204,13 +210,13 @@ describe("filing after reading", () => {
       observations: [flagged],
       previous: { [flagged.key]: flagged },
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     await processNewMailArrivals({
       ...options,
       observations: [read],
       previous: { [flagged.key]: flagged },
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(pending).toEqual({});
   });
   it("removes pending work after a manual move out of Inbox", async () => {
@@ -225,5 +231,36 @@ describe("filing after reading", () => {
     });
     expect(pending).toEqual({});
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("retries an unread arrival after failure, then checkpoints drafting until reading", async () => {
+    const pending = {};
+    const options = {
+      emailAccountId: "account",
+      initialized: true,
+      pending,
+      fileAfterReading: true,
+      observations: [unread],
+    };
+    fetchMock.mockRejectedValueOnce(new Error("Temporarily unavailable"));
+    expect(
+      await processNewMailArrivals({ ...options, previous: {} }),
+    ).toHaveLength(1);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ deferred: [unread.key] }),
+    });
+    await processNewMailArrivals({
+      ...options,
+      previous: { [unread.key]: unread },
+    });
+    await processNewMailArrivals({
+      ...options,
+      previous: { [unread.key]: unread },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(pending).toEqual({
+      [unread.key]: { ...unread, draftAttempted: true },
+    });
   });
 });

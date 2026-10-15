@@ -31,12 +31,21 @@ import {
 import { findMatchingRules } from "@/utils/ai/choose-rule/match-rules";
 import { getActionItemsWithAiArgs } from "@/utils/ai/choose-rule/choose-args";
 import { executeAct } from "@/utils/ai/choose-rule/execute";
-import { determineConversationStatus } from "@/utils/reply-tracker/handle-conversation-status";
+import {
+  determineConversationStatus,
+  updateThreadTrackers,
+} from "@/utils/reply-tracker/handle-conversation-status";
+import { removeConflictingThreadStatusLabels } from "@/utils/reply-tracker/label-helpers";
+import { acquireOwnedLock, clearOwnedLock } from "@/utils/redis/owned-lock";
 import { isDraftReplyActionType } from "@/utils/actions/draft-reply";
 
 const logger = createTestLogger();
 
 vi.mock("@/utils/prisma");
+vi.mock("@/utils/redis/owned-lock", () => ({
+  acquireOwnedLock: vi.fn().mockResolvedValue("lock-token"),
+  clearOwnedLock: vi.fn().mockResolvedValue(true),
+}));
 vi.mock("@/utils/ai/choose-rule/match-rules", () => ({
   findMatchingRules: vi.fn(),
 }));
@@ -1695,6 +1704,200 @@ describe("runRules cold email pattern learning", () => {
     await runRulesWithDefaults({ rules: [coldEmailRule] });
 
     expect(saveLearnedPattern).not.toHaveBeenCalled();
+  });
+});
+
+describe("arrival drafting before filing", () => {
+  const draft = getAction({
+    type: ActionType.DRAFT_EMAIL,
+    content: "Draft reply",
+  });
+  const move = getAction({
+    type: ActionType.MOVE_FOLDER,
+    folderName: "Replies",
+  });
+  const rule = createRule("reply-with-filing", SystemType.TO_REPLY, [
+    draft,
+    move,
+  ]);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.executedRule.findMany.mockResolvedValue([]);
+    prisma.executedRule.findFirst.mockResolvedValue(null);
+    vi.mocked(getActionItemsWithAiArgs).mockImplementation(
+      async ({ selectedRule }) => selectedRule.actions,
+    );
+    vi.mocked(executeAct).mockResolvedValue(ExecutedRuleStatus.APPLIED);
+    mockMatchingRules([{ rule }]);
+    mockExecutedRuleCreate({ rule, actionItems: [draft] });
+    vi.mocked(acquireOwnedLock).mockResolvedValue("lock-token");
+  });
+
+  it("only executes email drafts and leaves conversation labels and read status untouched", async () => {
+    await runRulesWithDefaults({ rules: [rule], draftOnly: true });
+    expect(getActionItemsWithAiArgs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedRule: expect.objectContaining({ actions: [draft] }),
+      }),
+    );
+    expect(prisma.executedRule.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ draftOnly: true }),
+      }),
+    );
+    expect(removeConflictingThreadStatusLabels).not.toHaveBeenCalled();
+    expect(updateThreadTrackers).not.toHaveBeenCalled();
+    expect(executeAct).toHaveBeenCalledOnce();
+  });
+
+  it("records an early attempt even when confidence suppresses the draft", async () => {
+    vi.mocked(getActionItemsWithAiArgs).mockResolvedValue([]);
+    await runRulesWithDefaults({ rules: [rule], draftOnly: true });
+    expect(prisma.executedRule.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          draftOnly: true,
+          actionItems: { createMany: { data: [] } },
+        }),
+      }),
+    );
+    expect(executeAct).not.toHaveBeenCalled();
+  });
+
+  it("does not repeat an arrival attempt on another observer pass", async () => {
+    prisma.executedRule.findMany.mockResolvedValueOnce([
+      {
+        rule,
+        actionItems: [draft],
+        status: ExecutedRuleStatus.APPLIED,
+        createdAt: new Date(),
+        reason: "Needs reply",
+        draftOnly: true,
+      },
+    ] as never);
+    const results = await runRulesWithDefaults({
+      rules: [rule],
+      draftOnly: true,
+    });
+    expect(results[0].existing).toBe(true);
+    expect(findMatchingRules).not.toHaveBeenCalled();
+    expect(prisma.executedRule.create).not.toHaveBeenCalled();
+    expect(executeAct).not.toHaveBeenCalled();
+  });
+
+  it("defers concurrent processing without starting another draft", async () => {
+    vi.mocked(acquireOwnedLock).mockResolvedValueOnce(null);
+    const result = await runRulesWithDefaults({
+      rules: [rule],
+      draftOnly: true,
+    });
+    expect(result[0].status).toBe(ExecutedRuleStatus.APPLYING);
+    expect(findMatchingRules).not.toHaveBeenCalled();
+    expect(executeAct).not.toHaveBeenCalled();
+  });
+
+  it("releases the arrival lock when generation fails", async () => {
+    vi.mocked(getActionItemsWithAiArgs).mockRejectedValueOnce(
+      new Error("Generation unavailable"),
+    );
+    await expect(
+      runRulesWithDefaults({ rules: [rule], draftOnly: true }),
+    ).rejects.toThrow("Generation unavailable");
+    expect(clearOwnedLock).toHaveBeenCalledWith(
+      expect.objectContaining({ lockToken: "lock-token" }),
+    );
+  });
+
+  it.each([
+    ExecutedRuleStatus.APPLYING,
+    ExecutedRuleStatus.ERROR,
+  ])("does not file over an unfinished %s draft", async (status) => {
+    prisma.executedRule.findMany.mockResolvedValueOnce([
+      { rule, actionItems: [], status, draftOnly: true },
+    ] as never);
+    const results = await runRulesWithDefaults({ rules: [rule] });
+    expect(results[0].status).toBe(status);
+    expect(findMatchingRules).not.toHaveBeenCalled();
+    expect(executeAct).not.toHaveBeenCalled();
+  });
+
+  it("checks completed processing again inside the lock", async () => {
+    prisma.executedRule.findMany.mockResolvedValueOnce([
+      {
+        rule,
+        actionItems: [move],
+        status: ExecutedRuleStatus.APPLIED,
+        draftOnly: false,
+      },
+    ] as never);
+    await runRulesWithDefaults({
+      rules: [rule],
+      beforeRuleExecution: async () => {},
+    });
+    expect(findMatchingRules).not.toHaveBeenCalled();
+    expect(executeAct).not.toHaveBeenCalled();
+  });
+
+  it("files after reading without regenerating the arrival draft", async () => {
+    prisma.executedRule.findMany.mockResolvedValueOnce([
+      {
+        rule,
+        actionItems: [draft],
+        status: ExecutedRuleStatus.APPLIED,
+        draftOnly: true,
+      },
+    ] as never);
+    await runRulesWithDefaults({ rules: [rule] });
+    expect(getActionItemsWithAiArgs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedRule: expect.objectContaining({ actions: [move] }),
+      }),
+    );
+    expect(prisma.executedRule.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ draftOnly: false }),
+      }),
+    );
+    expect(updateThreadTrackers).toHaveBeenCalledOnce();
+  });
+
+  it("keeps filing-only actions for the later pass", async () => {
+    const filingRule = createRule("file", null, [move]);
+    mockMatchingRules([{ rule: filingRule }]);
+    await runRulesWithDefaults({ rules: [filingRule], draftOnly: true });
+    expect(getActionItemsWithAiArgs).not.toHaveBeenCalled();
+    expect(executeAct).not.toHaveBeenCalled();
+    expect(prisma.executedRule.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          draftOnly: true,
+          status: ExecutedRuleStatus.SKIPPED,
+        }),
+      }),
+    );
+  });
+
+  it("allows an explicit rerun to regenerate a draft", async () => {
+    await runRulesWithDefaults({ rules: [rule], rerun: true });
+    expect(prisma.executedRule.findMany).not.toHaveBeenCalled();
+    expect(getActionItemsWithAiArgs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedRule: expect.objectContaining({ actions: [draft, move] }),
+      }),
+    );
+  });
+
+  it("does not let another message's draft suppress a new arrival", async () => {
+    await runRulesWithDefaults({ rules: [rule], draftOnly: true });
+    expect(prisma.executedRule.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          messageId: getRunRulesMessage().id,
+          threadId: getRunRulesMessage().threadId,
+        }),
+      }),
+    );
   });
 });
 

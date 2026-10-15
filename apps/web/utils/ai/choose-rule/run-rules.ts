@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { acquireOwnedLock, clearOwnedLock } from "@/utils/redis/owned-lock";
 import { filterSpam } from "@/utils/spam/gate";
 import type { ParsedMessage, RuleWithActions } from "@/utils/types";
 import {
@@ -89,18 +90,7 @@ export type RunRulesResult = {
   createdAt: Date;
 };
 
-export async function runRules({
-  provider,
-  message,
-  rules,
-  emailAccount,
-  isTest,
-  modelType,
-  logger,
-  skipArchive,
-  skipDraftReplies,
-  beforeRuleExecution,
-}: {
+type RunRulesOptions = {
   provider: EmailProvider;
   message: ParsedMessage;
   rules: RuleWithActions[];
@@ -111,7 +101,50 @@ export async function runRules({
   skipArchive?: boolean;
   skipDraftReplies?: boolean;
   beforeRuleExecution?: () => Promise<void>;
-}): Promise<RunRulesResult[]> {
+  draftOnly?: boolean;
+  rerun?: boolean;
+};
+
+export async function runRules(
+  options: RunRulesOptions,
+): Promise<RunRulesResult[]> {
+  if (options.isTest || (!options.draftOnly && !options.beforeRuleExecution)) {
+    return runRulesUnlocked(options);
+  }
+  const key = `arrival-rules:${options.emailAccount.id}:${options.message.id}`;
+  const lockToken = await acquireOwnedLock({ key, processingTtlSeconds: 600 });
+  if (!lockToken) {
+    return [
+      {
+        status: ExecutedRuleStatus.APPLYING,
+        reason: "Message processing is already in progress",
+        createdAt: new Date(),
+      },
+    ];
+  }
+  try {
+    return await runRulesUnlocked(options);
+  } finally {
+    await clearOwnedLock({ key, lockToken }).catch((error) => {
+      options.logger.error("Failed to release arrival rule lock", { error });
+    });
+  }
+}
+
+async function runRulesUnlocked({
+  provider,
+  message,
+  rules,
+  emailAccount,
+  isTest,
+  modelType,
+  logger,
+  skipArchive,
+  skipDraftReplies,
+  beforeRuleExecution,
+  draftOnly = false,
+  rerun = false,
+}: RunRulesOptions): Promise<RunRulesResult[]> {
   const spamVerdict = await filterSpam({
     emailAccountId: emailAccount.id,
     message,
@@ -129,6 +162,49 @@ export async function runRules({
       },
     ];
   }
+  const previousExecutions =
+    !isTest && !rerun
+      ? ((await prisma.executedRule.findMany({
+          where: {
+            emailAccountId: emailAccount.id,
+            messageId: message.id,
+            threadId: message.threadId,
+          },
+          include: { rule: true, actionItems: true },
+        })) ?? [])
+      : [];
+  const previousDrafts = previousExecutions.filter(
+    (execution) => execution.draftOnly,
+  );
+  const previousFullExecutions = previousExecutions.filter(
+    (execution) => !execution.draftOnly,
+  );
+  const existing = previousFullExecutions.length
+    ? previousFullExecutions
+    : previousDrafts;
+  if (
+    previousFullExecutions.length ||
+    (draftOnly && previousDrafts.length) ||
+    previousDrafts.some(
+      (execution) =>
+        execution.status === ExecutedRuleStatus.ERROR ||
+        execution.status === ExecutedRuleStatus.APPLYING,
+    )
+  ) {
+    return existing.map((execution) => ({
+      rule: execution.rule,
+      actionItems: execution.actionItems,
+      reason: execution.reason,
+      status: execution.status,
+      createdAt: execution.createdAt,
+      existing: true,
+    }));
+  }
+  // Reading a message must not regenerate a draft already attempted on arrival.
+  skipDraftReplies ||= previousDrafts.length > 0;
+  const skipDraftReason = previousDrafts.length
+    ? "A draft reply was already attempted on arrival"
+    : "Draft replies were disabled for this bulk run";
   const batchTimestamp = new Date(); // Single timestamp for this batch execution
   const { regularRules, conversationRules } = prepareRulesWithMetaRule(rules);
 
@@ -201,9 +277,22 @@ export async function runRules({
     }
   }
 
-  const executableMatches = skipDraftReplies
-    ? removeDraftReplyActionsFromMatches(matchesWithFlags)
+  const phaseMatches = draftOnly
+    ? matchesWithFlags
+        .map((match) => ({
+          ...match,
+          rule: {
+            ...match.rule,
+            actions: match.rule.actions.filter(
+              (action) => action.type === ActionType.DRAFT_EMAIL,
+            ),
+          },
+        }))
+        .filter((match) => match.rule.actions.length > 0)
     : matchesWithFlags;
+  const executableMatches = skipDraftReplies
+    ? removeDraftReplyActionsFromMatches(phaseMatches)
+    : phaseMatches;
   const finalMatches = limitDraftEmailActions(executableMatches, logger);
 
   logger.trace("Matching rule", () => ({
@@ -223,6 +312,7 @@ export async function runRules({
               threadId: message.threadId,
               messageId: message.id,
               automated: true,
+              draftOnly,
               reason,
               matchMetadata: undefined,
               status: ExecutedRuleStatus.SKIPPED,
@@ -251,7 +341,7 @@ export async function runRules({
     const ruleToExecute = result.rule;
     const reasonToUse = result.resolvedReason || results.reasoning;
 
-    if (!result.isConversationRule) {
+    if (!draftOnly && !result.isConversationRule) {
       analyzeSenderPatternIfAiMatch({
         isTest,
         result,
@@ -275,8 +365,9 @@ export async function runRules({
       batchTimestamp,
       logger,
       skipArchive,
-      skipDraftReplies,
+      skipDraftReplies ? skipDraftReason : undefined,
       beforeRuleExecution,
+      draftOnly,
     );
 
     executedRules.push({
@@ -391,8 +482,9 @@ async function executeMatchedRule(
   batchTimestamp: Date,
   logger: Logger,
   skipArchive?: boolean,
-  skipDraftReplies?: boolean,
+  skipDraftReason?: string,
   beforeRuleExecution?: () => Promise<void>,
+  draftOnly = false,
 ) {
   const blockedActionTypes = getBlockedLowTrustStaticFromActionTypes(
     rule.from,
@@ -429,13 +521,13 @@ async function executeMatchedRule(
     logger,
   });
 
-  const skippedDraftOnlyRule = skipDraftReplies && rule.actions.length === 0;
+  const skippedDraftOnlyRule = skipDraftReason && rule.actions.length === 0;
   if (
     actionItems.length === 0 &&
     (blockedActionTypes.length || skippedDraftOnlyRule)
   ) {
     const skipReason = skippedDraftOnlyRule
-      ? "Draft replies were disabled for this bulk run"
+      ? skipDraftReason
       : LOW_TRUST_STATIC_FROM_OUTBOUND_MESSAGE;
     const reasonToUse = reason ? `${reason}. ${skipReason}` : skipReason;
     let executedRule = null;
@@ -447,6 +539,7 @@ async function executeMatchedRule(
           messageId: message.id,
           threadId: message.threadId,
           automated: true,
+          draftOnly,
           status: ExecutedRuleStatus.SKIPPED,
           reason: reasonToUse,
           matchMetadata: serializeMatchReasons(matchReasons),
@@ -534,6 +627,7 @@ async function executeMatchedRule(
           messageId: message.id,
           threadId: message.threadId,
           automated: true,
+          draftOnly,
           status: ExecutedRuleStatus.APPLYING, // Changed from PENDING - rules are now always automated
           reason,
           matchMetadata: serializeMatchReasons(matchReasons),
@@ -557,6 +651,7 @@ async function executeMatchedRule(
   // overwrite how the pattern was originally learned. Taking a message out of junk
   // relies on that provenance to undo what junking it taught us.
   if (
+    !draftOnly &&
     rule.systemType === SystemType.COLD_EMAIL &&
     !matchReasons?.some(
       (matchReason) => matchReason.type === ConditionType.LEARNED_PATTERN,
@@ -599,7 +694,7 @@ async function executeMatchedRule(
     }
   }
 
-  if (isConversationStatusType(rule.systemType)) {
+  if (!draftOnly && isConversationStatusType(rule.systemType)) {
     await Promise.all([
       removeConflictingThreadStatusLabels({
         emailAccountId: emailAccount.id,

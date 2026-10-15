@@ -30,3 +30,11 @@ export function createFilingGuard(provider: EmailProvider, messageId: string) {
       throw new AutomaticFilingDeferredError();
   };
 }
+
+export function createDraftGuard(provider: EmailProvider, messageId: string) {
+  return async () => {
+    const message = await provider.getMessage(messageId);
+    if (!message.labelIds?.includes("INBOX"))
+      throw new AutomaticFilingDeferredError();
+  };
+}
