@@ -33,6 +33,9 @@ const mockExecutedRuleUpdate = vi.fn().mockResolvedValue({});
 vi.mock("@/utils/prisma", () => ({
   default: {
     emailAccount: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        autoFileAfterReading: false,
+      }),
       findUnique: vi.fn().mockResolvedValue({
         userId: "test-user-id",
         spamFilterEnabled: false,

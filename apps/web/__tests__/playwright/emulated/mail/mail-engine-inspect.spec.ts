@@ -326,6 +326,7 @@ test("opens account reconnect from blocked_auth catch-up", async ({
     enumerationRequests += 1;
     await route.continue();
   });
+  await page.evaluate(() => window.__inboxZeroMailInspect?.requestSync());
   await expect(
     page.getByRole("heading", {
       name: "Reconnect this account to continue syncing.",

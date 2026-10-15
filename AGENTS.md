@@ -23,6 +23,15 @@
 - For core bug-fix tasks, default to TDD when practical (red/green/refactor); AI prompt improvements should generally be backed by evals too, and TDD is often useful there as well.
 - When adding a new workspace package, add its `package.json` COPY line to `docker/Dockerfile.prod` and `docker/Dockerfile.local`.
 
+## Push and Deployment Workflow
+- Use focused tests while developing, then run the full `pnpm test` and `pnpm test-integration` suites before pushing changes to shared mail processing, providers, rule execution, or drafting. A focused regression test does not replace the surrounding integration suite.
+- Test runners need permission to open local emulator ports; an `EPERM` bind failure is an execution-environment problem. The full integration suite also requires Docker for its Redis-backed tests. Report missing prerequisites and require the complete CI suite to pass before deployment rather than treating blocked tests as passes.
+- Run the applicable checks from `.github/workflows/test.yml` before pushing: formatting, package types/tests, structural conventions, enum imports, server action exports, client redirects, and fixture hygiene. For schema changes, also run the relevant database tests against a throwaway database.
+- For browser-facing changes, run the selected browser specs and inspect their screenshots. Build only when requested or required by an authorized deployment.
+- Put temporary build output in an already ignored directory and verify it with `git check-ignore` before starting the build, so generated files do not flood the working tree.
+- After pushing, inspect Actions for that exact commit and wait for every applicable check to finish. Fix failures and verify the replacement commit; do not treat a successful local build or a successful push as green CI.
+- Deploy only after the pushed commit's applicable CI checks pass, unless the user explicitly requests deployment before CI finishes. Keep local validation, GitHub CI, and deployment health separate in the final report.
+
 ## Code Style
 - Install packages in `apps/web`, not root: `cd apps/web && pnpm add ...`
 - Lodash: import specific functions (`import groupBy from "lodash/groupBy"`)
