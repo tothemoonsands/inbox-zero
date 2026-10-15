@@ -1,4 +1,4 @@
-import { getConditionTypes, isAIRule } from "@/utils/condition";
+import { getConditionTypes, isAIRule, isStaticRule } from "@/utils/condition";
 import {
   findMatchingGroup,
   getGroupsWithRules,
@@ -96,6 +96,29 @@ export async function findMatchingRules({
 }): Promise<MatchingRulesResult> {
   const logger = log.with({ module: MODULE });
   const isThread = provider.isReplyInThread(message);
+  const staticRules = rules.filter(
+    (rule) =>
+      isStaticRule(rule) &&
+      !isAIRule(rule) &&
+      rule.systemType !== SystemType.COLD_EMAIL,
+  );
+  if (staticRules.length) {
+    const result = await findPotentialMatchingRules({
+      rules: staticRules,
+      message,
+      isThread,
+      provider,
+      emailAccountId: emailAccount.id,
+      logger,
+    });
+    if (result.matches.length) {
+      return {
+        matches: result.matches,
+        reasoning: getMatchesReasoning(result.matches),
+        selectionMetadata: result.selectionMetadata,
+      };
+    }
+  }
   const email = getEmailForLLM(message);
   const decisionModel = await getDecisionModelConfig(emailAccount);
   const coldEmailRule = await getColdEmailRule(emailAccount.id);
@@ -982,14 +1005,14 @@ function getNormalizedEmailMatchHeaders(message: ParsedMessage) {
       message.headers.from,
     ),
     toAddressHeader: normalizeEmailHeaderForRuleMatching(
-      message.headers.to,
+      [message.headers.to, message.headers.cc].filter(Boolean).join(", "),
       true,
     ),
     fromDisplayNameHeader: normalizeEmailDisplayNameHeaderForRuleMatching(
       message.headers.from,
     ),
     toDisplayNameHeader: normalizeEmailDisplayNameHeaderForRuleMatching(
-      message.headers.to,
+      [message.headers.to, message.headers.cc].filter(Boolean).join(", "),
     ),
   };
 }

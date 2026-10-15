@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-vi.mock("@/utils/spam/feedback", () => ({ trainSpamMessage: vi.fn() }));
+import { trainSpamMessage } from "@/utils/spam/feedback";
 import { createEmailProviderOperationExecutor } from "./operations";
 import type { EmailProvider } from "@/utils/email/types";
 import type { PreparedOperation } from "@inboxzero/mail-core/operations";
@@ -17,6 +17,7 @@ import {
 import type { ScheduledEmail } from "@/generated/prisma/client";
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/utils/spam/feedback", () => ({ trainSpamMessage: vi.fn() }));
 vi.mock("@/utils/prisma");
 vi.mock("@/utils/email/durable-email-send", () => ({
   executeDurableEmailSend: vi.fn(),
@@ -327,6 +328,59 @@ describe("createEmailProviderOperationExecutor", () => {
     });
     expect(result.status).toBe("confirmed");
     expect(markNotSpam).toHaveBeenCalledWith("thread-spam");
+  });
+
+  it.each([
+    { labels: ["TRASH"], trains: false },
+    { labels: ["SPAM"], trains: false },
+    { labels: ["INBOX"], trains: true },
+    { labels: ["Work"], trains: true },
+  ])("only learns a Junk rescue for destination $labels", async ({
+    labels,
+    trains,
+  }) => {
+    const message = {
+      id: "spam-1",
+      threadId: "thread-spam",
+      headers: { from: "sender@example.com", to: "me@example.com" },
+      labelIds: ["SPAM"],
+      snippet: "message",
+    };
+    const getMessage = vi
+      .fn()
+      .mockResolvedValueOnce(message)
+      .mockResolvedValue({ ...message, labelIds: labels });
+    const moveThreadToFolder = vi.fn();
+    const executor = createEmailProviderOperationExecutor({
+      accountId: "acc-1",
+      provider: {
+        name: "icloud",
+        getMessage,
+        moveThreadToFolder,
+        getMessagesBatch: vi.fn().mockResolvedValue([]),
+      } as unknown as EmailProvider,
+    });
+    await executor.execute({
+      operation: {
+        ...metadataOperation([{ accountId: "acc-1", messageId: "spam-1" }]),
+        intent: {
+          kind: "metadata",
+          targets: [{ accountId: "acc-1", messageId: "spam-1" }],
+          change: { kind: "move", folderId: "destination" },
+        },
+      },
+      attemptId: "move-spam",
+      signal: new AbortController().signal,
+    });
+    expect(moveThreadToFolder).toHaveBeenCalledOnce();
+    expect(trainSpamMessage).toHaveBeenCalledTimes(trains ? 1 : 0);
+    if (trains)
+      expect(trainSpamMessage).toHaveBeenCalledWith(
+        "acc-1",
+        expect.any(Object),
+        "good",
+        expect.any(Object),
+      );
   });
 
   it("executes sends through the existing durable receipt ledger", async () => {

@@ -144,6 +144,7 @@ enum ApiKeyScope {
 
 // Migrating over to the new settings model. Currently most settings are in the User model, but will be moved to this model in the future.
 model EmailAccount {
+  autoFileAfterReading Boolean?
   spamFilterEnabled Boolean @default(false)
   spamDecisions SpamDecision[]
   spamTraining SpamTraining[]

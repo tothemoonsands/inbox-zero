@@ -481,7 +481,7 @@ export function ConditionSteps({
 }
 
 const getFilterTooltipText = (filterType: "from" | "to") =>
-  `Only apply this rule ${filterType} emails from this address. Supports multiple addresses separated by comma, pipe, or OR. e.g. "@company.com", "hello@example.com OR support@test.com"`;
+  `${filterType === "from" ? "Match the sender" : "Match a recipient in To or Cc"}. Supports multiple addresses or domains separated by comma, pipe, or OR. e.g. "@company.com", "hello@example.com OR support@test.com"`;
 
 function getConditionTypeLabel(uiType: UIConditionType | undefined): string {
   switch (uiType) {

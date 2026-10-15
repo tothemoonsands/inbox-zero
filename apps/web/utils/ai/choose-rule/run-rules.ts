@@ -52,6 +52,7 @@ import {
 } from "@/utils/rule/learned-patterns";
 import { internalDateToDate } from "@/utils/date";
 import { ConditionType } from "@/utils/config";
+import { isAIRule, isStaticRule } from "@/utils/condition";
 import type { Logger } from "@/utils/logger";
 import {
   getBlockedLowTrustStaticFromActionTypes,
@@ -871,6 +872,10 @@ export async function ensureConversationRuleContinuity({
   logger: Logger;
 }): Promise<{ rule: RuleWithActions; matchReasons?: MatchReason[] }[]> {
   if (conversationRules.length === 0) {
+    return matches;
+  }
+
+  if (matches.some(({ rule }) => isStaticRule(rule) && !isAIRule(rule))) {
     return matches;
   }
 

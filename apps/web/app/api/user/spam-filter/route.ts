@@ -24,11 +24,19 @@ async function getStatus(emailAccountId: string) {
       tokenizerVersion: true,
     },
   });
-  const [filtered, corrections] = await Promise.all([
+  const [filtered, good, spam] = await Promise.all([
     prisma.spamDecision.count({
       where: { emailAccountId, verdict: "spam", movedAt: { not: null } },
     }),
-    prisma.spamTraining.count({ where: { emailAccountId } }),
+    prisma.spamTraining.count({ where: { emailAccountId, label: "good" } }),
+    prisma.spamTraining.count({ where: { emailAccountId, label: "spam" } }),
   ]);
-  return { enabled: account.spamFilterEnabled, model, filtered, corrections };
+  return {
+    enabled: account.spamFilterEnabled,
+    model,
+    filtered,
+    corrections: good + spam,
+    good,
+    spam,
+  };
 }

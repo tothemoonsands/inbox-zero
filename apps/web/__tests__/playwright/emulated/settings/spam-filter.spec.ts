@@ -18,9 +18,11 @@ test("enables an imported spam model and persists the setting", async ({
   const account = await client.query<{
     userId: string;
     spamFilterEnabled: boolean;
-  }>(`SELECT "userId","spamFilterEnabled" FROM "EmailAccount" WHERE id=$1`, [
-    emailAccountId,
-  ]);
+    autoFileAfterReading: boolean | null;
+  }>(
+    `SELECT "userId","spamFilterEnabled","autoFileAfterReading" FROM "EmailAccount" WHERE id=$1`,
+    [emailAccountId],
+  );
   let inserted = false;
   try {
     await client.query(
@@ -29,7 +31,7 @@ test("enables an imported spam model and persists the setting", async ({
     );
     inserted = true;
     await client.query(
-      `UPDATE "EmailAccount" SET "spamFilterEnabled"=false WHERE id=$1`,
+      `UPDATE "EmailAccount" SET "spamFilterEnabled"=false, "autoFileAfterReading"=false WHERE id=$1`,
       [emailAccountId],
     );
     await markAutomationOnboardingViewed(page);
@@ -39,6 +41,10 @@ test("enables an imported spam model and persists the setting", async ({
     await expect(card).toContainText(
       "20 imported messages, 200 learned tokens",
     );
+    await expect(card).toContainText(
+      "0 messages trained (0 marked good, 0 marked junk)",
+    );
+    await expect(card).toContainText("deleting it does not train the filter");
     const toggle = card.getByRole("switch");
     await expect(toggle).not.toBeChecked();
     await toggle.click();
@@ -59,12 +65,33 @@ test("enables an imported spam model and persists the setting", async ({
     await card.screenshot({
       path: test.info().outputPath("spam-filter-enabled.png"),
     });
+    const filing = getAutomationSettingsCard(page, "File after reading");
+    await expect(filing.getByRole("switch")).not.toBeChecked();
+    await filing.getByRole("switch").click();
+    await expect
+      .poll(async () => {
+        const result = await client.query(
+          `SELECT "autoFileAfterReading" FROM "EmailAccount" WHERE id=$1`,
+          [emailAccountId],
+        );
+        return result.rows[0].autoFileAfterReading;
+      })
+      .toBe(true);
+    await page.reload();
+    await expect(filing.getByRole("switch")).toBeChecked();
+    await filing.screenshot({
+      path: test.info().outputPath("file-after-reading-enabled.png"),
+    });
   } finally {
     if (inserted)
       await client.query(`DELETE FROM "SpamModel" WHERE id=$1`, [id]);
     await client.query(
-      `UPDATE "EmailAccount" SET "spamFilterEnabled"=$2 WHERE id=$1`,
-      [emailAccountId, account.rows[0].spamFilterEnabled],
+      `UPDATE "EmailAccount" SET "spamFilterEnabled"=$2, "autoFileAfterReading"=$3 WHERE id=$1`,
+      [
+        emailAccountId,
+        account.rows[0].spamFilterEnabled,
+        account.rows[0].autoFileAfterReading,
+      ],
     );
     await client.end();
   }

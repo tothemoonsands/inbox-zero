@@ -60,6 +60,9 @@ test("creates, edits, toggles, and deletes a manual automation rule", async ({
     .fill(RULE_NAME);
   const createButton = createDialog.getByRole("button", { name: "Create" });
   await expect(createButton).toBeEnabled();
+  await createDialog.screenshot({
+    path: test.info().outputPath("manual-rule-editor.png"),
+  });
   await createButton.click();
   await expect
     .poll(() => getRuleState(emailAccountId), {

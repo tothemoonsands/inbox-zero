@@ -281,7 +281,8 @@ async function main() {
             previous: previouslyObserved,
             initialized: state.initialized && !result.reset,
             pending: state.pendingArrivals,
-            fileAfterReading: config.fileAfterReading,
+            fileAfterReading:
+              account.autoFileAfterReading ?? config.fileAfterReading,
           });
           let processingErrors = arrivalErrors.length;
           for (const error of arrivalErrors)

@@ -456,6 +456,12 @@ export function RuleForm({
             ruleSystemType={rule.systemType}
             appendCondition={appendCondition}
           />
+          <p className="mt-3 text-sm text-muted-foreground">
+            Rules with only From, To, Subject, or Body conditions run before AI
+            classification. When one matches, AI classification is skipped. For
+            recipient domains, use a To condition such as @example.com,
+            @example.org. Filing still follows your File after reading setting.
+          </p>
         </RuleSectionCard>
 
         <RuleSectionCard

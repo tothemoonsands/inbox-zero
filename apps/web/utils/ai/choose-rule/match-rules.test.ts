@@ -2027,6 +2027,53 @@ describe("findMatchingRules - Integration Tests", () => {
     vi.clearAllMocks();
   });
 
+  it.each([
+    "to",
+    "cc",
+  ] as const)("routes an exact %s recipient domain before cold-email or AI classification", async (header) => {
+    const routingRule = getRule({
+      id: "recipient-routing",
+      instructions: null,
+      to: "@example.org, @example.net",
+      runOnThreads: true,
+    });
+    const result = await findMatchingRules({
+      rules: [
+        routingRule,
+        getRule({ id: "ai-rule", instructions: "Classify this mail" }),
+      ],
+      message: getMessage({
+        headers: getHeaders({ [header]: '"Work" <user@EXAMPLE.NET>' }),
+      }),
+      emailAccount: getEmailAccount(),
+      provider,
+      modelType: "default",
+      logger,
+    });
+    expect(result.matches.map(({ rule }) => rule.id)).toEqual([routingRule.id]);
+    expect(result.matches[0].matchReasons).toEqual([
+      { type: ConditionType.STATIC },
+    ]);
+    expect(getColdEmailRule).not.toHaveBeenCalled();
+    expect(aiChooseRule).not.toHaveBeenCalled();
+    expect(decisionModelChooseRule).not.toHaveBeenCalled();
+  });
+
+  it("does not route a lookalike recipient domain", async () => {
+    vi.mocked(getColdEmailRule).mockResolvedValue(null);
+    const result = await findMatchingRules({
+      rules: [getRule({ instructions: null, to: "@example.org" })],
+      message: getMessage({
+        headers: getHeaders({ to: "user@example.org.evil.test" }),
+      }),
+      emailAccount: getEmailAccount(),
+      provider,
+      modelType: "default",
+      logger,
+    });
+    expect(result.matches).toEqual([]);
+  });
+
   it("should detect and return cold email when enabled", async () => {
     const coldEmailRule = getRule({
       id: "cold-email-rule",
@@ -2156,15 +2203,14 @@ describe("findMatchingRules - Integration Tests", () => {
       logger,
     });
 
-    expect(getColdEmailRule).toHaveBeenCalledWith(emailAccount.id);
-    expect(isColdEmailRuleEnabled).toHaveBeenCalledWith(coldEmailRule);
+    expect(getColdEmailRule).not.toHaveBeenCalled();
     expect(isColdEmail).not.toHaveBeenCalled();
 
-    // Should match the normal rule instead
+    // The explicit static rule takes priority.
     expect(result.matches[0]?.rule.id).toBe("normal-rule");
   });
 
-  it("should continue to other rules when email is not cold", async () => {
+  it("prioritizes an explicit static rule over cold-email detection", async () => {
     const coldEmailRule = getRule({
       id: "cold-email-rule",
       systemType: SystemType.COLD_EMAIL,
@@ -2197,7 +2243,7 @@ describe("findMatchingRules - Integration Tests", () => {
       logger,
     });
 
-    expect(isColdEmail).toHaveBeenCalled();
+    expect(isColdEmail).not.toHaveBeenCalled();
 
     // Should continue and match the normal rule
     expect(result.matches[0]?.rule.id).toBe("normal-rule");
@@ -2893,7 +2939,7 @@ describe("findMatchingRules - Integration Tests", () => {
     expect(result.matches[0]?.rule.id).toBe("mixed-rule");
   });
 
-  it("merges static match with AI rule and combines reasoning text", async () => {
+  it("returns the static match without asking AI for additional rules", async () => {
     const staticRule = getRule({
       id: "static-rule-1",
       from: "reason@example.com",
@@ -2921,11 +2967,9 @@ describe("findMatchingRules - Integration Tests", () => {
       logger,
     });
 
-    // Reasoning should combine existing matchReasons text + AI reason
-    // existing part comes from getMatchReason => "Matched static conditions"
-    expect(result.reasoning).toBe(
-      "Matched static conditions; AI reasoning here",
-    );
+    expect(result.reasoning).toBe("Matched static conditions");
+    expect(result.matches.map(({ rule }) => rule.id)).toEqual([staticRule.id]);
+    expect(aiChooseRule).not.toHaveBeenCalled();
   });
 
   it("matchesStaticRule: catches RegExp construction error and returns false", () => {

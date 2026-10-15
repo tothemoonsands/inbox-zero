@@ -1,4 +1,5 @@
 import type { Observation } from "@/utils/mail-corrections/changes";
+import { env } from "@/env";
 import type { Logger } from "@/utils/logger";
 import prisma from "@/utils/prisma";
 import { createEmailProvider } from "@/utils/email/provider";
@@ -17,7 +18,7 @@ export async function processObservedArrivals({
   previous,
   initialized,
   logger,
-  fileAfterReading = false,
+  fileAfterReading = env.AUTO_FILE_AFTER_READING,
 }: {
   emailAccountId: string;
   observations: Observation[];
@@ -38,9 +39,11 @@ export async function processObservedArrivals({
     select: {
       userId: true,
       createdAt: true,
+      autoFileAfterReading: true,
       account: { select: { provider: true } },
     },
   });
+  fileAfterReading = account.autoFileAfterReading ?? fileAfterReading;
   const provider = await createEmailProvider({
     emailAccountId,
     provider: account.account.provider,

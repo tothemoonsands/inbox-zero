@@ -99,6 +99,28 @@ it("classifies fresh arrivals even when the spam filter is disabled", async () =
   expect(filterSpam).not.toHaveBeenCalled();
   expect(runRulesForMessage).toHaveBeenCalledOnce();
 });
+it.each([
+  true,
+  false,
+])("uses the account read-first preference %s over the observer default", async (enabled) => {
+  vi.mocked(prisma.emailAccount.findUniqueOrThrow).mockResolvedValue({
+    userId: "user",
+    createdAt: new Date(1000),
+    autoFileAfterReading: enabled,
+    account: { provider: "icloud" },
+  } as never);
+  mocks.getMessage.mockResolvedValue({
+    ...getMockMessage({ labelIds: ["INBOX", "UNREAD"] }),
+    internalDate: "2000",
+  });
+  const deferred = await processObservedArrivals({
+    ...options,
+    fileAfterReading: !enabled,
+  });
+  expect(filterSpam).toHaveBeenCalledOnce();
+  expect(deferred).toEqual(enabled ? [observation.key] : []);
+  expect(runRulesForMessage).toHaveBeenCalledTimes(enabled ? 0 : 1);
+});
 it("does not run filing rules after an arrival is moved to Junk", async () => {
   vi.mocked(filterSpam).mockResolvedValue({
     spam: true,

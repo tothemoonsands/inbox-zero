@@ -32,6 +32,11 @@ vi.mock("@/utils/spam/gate", () => ({
 }));
 vi.mock("@/utils/prisma", () => ({
   default: {
+    emailAccount: {
+      findUniqueOrThrow: vi
+        .fn()
+        .mockResolvedValue({ autoFileAfterReading: null }),
+    },
     executedRule: {
       findFirst: vi.fn().mockResolvedValue(null),
     },
@@ -77,6 +82,9 @@ describe("Provider Edge Cases", () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
     vi.mocked(filterSpam).mockResolvedValue(null);
+    vi.mocked(prisma.emailAccount.findUniqueOrThrow).mockResolvedValue({
+      autoFileAfterReading: null,
+    } as never);
   });
 
   function getDefaultEmailAccount() {
@@ -97,6 +105,30 @@ describe("Provider Edge Cases", () => {
     emailAccount: getDefaultEmailAccount(),
     logger,
   };
+
+  it.each([
+    true,
+    false,
+  ])("honors the account read-first preference %s over the server default", async (enabled) => {
+    vi.spyOn(env, "AUTO_FILE_AFTER_READING", "get").mockReturnValue(!enabled);
+    vi.mocked(prisma.emailAccount.findUniqueOrThrow).mockResolvedValueOnce({
+      autoFileAfterReading: enabled,
+    } as never);
+    if (!enabled) vi.mocked(runRules).mockResolvedValueOnce([]);
+    const message = getMockParsedMessage({ labelIds: ["INBOX", "UNREAD"] });
+    await processHistoryItem(
+      { messageId: message.id, message },
+      {
+        ...baseOptions,
+        hasAutomationRules: true,
+        hasAiAccess: true,
+        provider: createMockEmailProvider({
+          getMessage: vi.fn().mockResolvedValue(message),
+        }),
+      },
+    );
+    expect(runRules).toHaveBeenCalledTimes(enabled ? 0 : 1);
+  });
 
   it.each([
     ["INBOX", "UNREAD"],

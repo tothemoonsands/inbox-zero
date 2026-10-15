@@ -1,4 +1,5 @@
 import { SpamFilterSetting } from "./SpamFilterSetting";
+import { AutomaticFilingSetting } from "./AutomaticFilingSetting";
 import { AboutSetting } from "@/app/(app)/[emailAccountId]/assistant/settings/AboutSetting";
 import { SensitiveDataPolicySetting } from "@/app/(app)/[emailAccountId]/assistant/settings/SensitiveDataPolicySetting";
 import { DigestSetting } from "@/app/(app)/[emailAccountId]/assistant/settings/DigestSetting";
@@ -23,6 +24,12 @@ const autoDraftDisabled = env.NEXT_PUBLIC_AUTO_DRAFT_DISABLED;
 export function SettingsTab() {
   return (
     <div className="max-w-4xl space-y-6">
+      <div className="space-y-2">
+        <SectionHeader>Incoming mail</SectionHeader>
+        <AutomaticFilingSetting />
+        <SpamFilterSetting />
+      </div>
+
       {!autoDraftDisabled && (
         <div className="space-y-2">
           <DraftReplies />
@@ -55,7 +62,6 @@ export function SettingsTab() {
 
       <div className="space-y-2">
         <SectionHeader>Advanced</SectionHeader>
-        <SpamFilterSetting />
         <SyncToExtensionSetting />
         <MultiRuleSetting />
         <ReferralSignatureSetting />

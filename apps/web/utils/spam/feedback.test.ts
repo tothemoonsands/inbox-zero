@@ -53,6 +53,23 @@ beforeEach(() => {
   vi.mocked(prisma.spamDecision.findUnique).mockResolvedValue(null);
 });
 describe("Junk correction provenance", () => {
+  it.each([
+    { targets: ["@trash"] },
+    { targets: [] },
+  ])("does not learn when Junk is deleted to $targets", async ({ targets }) => {
+    expect(
+      await learnSpamCorrection(
+        "account",
+        {
+          ...change,
+          before: { ...before, targets: ["@junk"] },
+          after: { ...change.after, targets },
+        },
+        logger,
+      ),
+    ).toBe("ignored");
+    expect(applySpamTraining).not.toHaveBeenCalled();
+  });
   it("learns a rescue when spam routing and the manual move both happen between snapshots", async () => {
     vi.mocked(prisma.spamDecision.findUnique).mockResolvedValue({
       verdict: "spam",

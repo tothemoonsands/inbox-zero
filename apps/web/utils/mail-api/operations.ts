@@ -374,7 +374,10 @@ async function applyChange(
         );
         if (message.labelIds?.includes("SPAM")) {
           const moved = await provider.getMessage(message.id);
-          if (!moved.labelIds?.includes("SPAM"))
+          if (
+            !moved.labelIds?.includes("SPAM") &&
+            !moved.labelIds?.includes("TRASH")
+          )
             await trainSpamMessage(emailAccountId, moved, "good", provider);
         }
       }

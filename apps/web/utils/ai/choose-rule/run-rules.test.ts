@@ -155,6 +155,25 @@ describe("ensureConversationRuleContinuity", () => {
     });
   });
 
+  it("does not invoke conversation classification for explicit static routing", async () => {
+    prisma.executedRule.findFirst.mockResolvedValue({
+      id: "previous-conversation",
+    } as never);
+    const matches = [
+      { rule: { ...regularRule, instructions: null, to: "@example.org" } },
+    ];
+    const result = await ensureConversationRuleContinuity({
+      emailAccountId,
+      threadId,
+      conversationRules: [toReplyRule],
+      regularRules: [regularRule, conversationMetaRule],
+      matches,
+      logger,
+    });
+    expect(result).toEqual(matches);
+    expect(prisma.executedRule.findFirst).not.toHaveBeenCalled();
+  });
+
   it("returns matches unchanged when conversation meta rule is already in matches", async () => {
     prisma.executedRule.findFirst.mockResolvedValue({
       id: "executed-rule-1",

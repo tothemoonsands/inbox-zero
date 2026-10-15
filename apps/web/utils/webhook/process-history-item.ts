@@ -241,9 +241,14 @@ export async function processHistoryItem(
     if (!hasExistingRule && hasAutomationRules && hasAiAccess) {
       logger.info("Running rules...");
 
-      const beforeRuleExecution = env.AUTO_FILE_AFTER_READING
-        ? createFilingGuard(provider, messageId)
-        : undefined;
+      const filingSettings = await prisma.emailAccount.findUniqueOrThrow({
+        where: { id: emailAccountId },
+        select: { autoFileAfterReading: true },
+      });
+      const beforeRuleExecution =
+        (filingSettings.autoFileAfterReading ?? env.AUTO_FILE_AFTER_READING)
+          ? createFilingGuard(provider, messageId)
+          : undefined;
       await beforeRuleExecution?.();
       const results = await runRules({
         provider,

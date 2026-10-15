@@ -29,7 +29,7 @@ export function SpamFilterSetting() {
   );
   const ready = data?.model?.status === "READY";
   const description = ready
-    ? `Checks incoming mail before AI processing. ${data.model!.importedMessages.toLocaleString()} imported messages, ${data.model!.importedWords.toLocaleString()} learned tokens. Move mail into or out of Junk to teach the filter. ${data.filtered.toLocaleString()} filtered; ${data.corrections.toLocaleString()} corrections.`
+    ? `Checks incoming mail before AI processing. ${data.model!.importedMessages.toLocaleString()} imported messages, ${data.model!.importedWords.toLocaleString()} learned tokens. ${data.filtered.toLocaleString()} automatically filtered in total; ${data.corrections.toLocaleString()} messages trained (${data.good.toLocaleString()} marked good, ${data.spam.toLocaleString()} marked junk). These totals are independent of the current Junk folder count. Moving mail out of Junk teaches good mail; deleting it does not train the filter.`
     : "Import your spam corpus to enable filtering before AI processing. Your learned model can be shared across your connected accounts.";
   return (
     <SettingCard
