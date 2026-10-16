@@ -70,8 +70,8 @@ gallery can compare it with `main` and attaches the same image to the full
 Playwright report.
 
 The emulated project runs when browser-facing files change in pull requests or
-on `main`, plus the daily schedule and manual dispatches. Pull requests run only
-the affected product areas and features. The selector traces imports from each
+on `main`, plus the weekly Monday schedule and manual dispatches. Both pushes
+and pull requests run only the affected product areas and features. The selector traces imports from each
 tested Next.js route and combines those results with explicit product boundaries.
 An area's optional `coverage.json` maps each spec filename to the app-relative
 component or hook entry points that its assertions and screenshots exercise.
@@ -86,15 +86,18 @@ Missing entry points or a spec without a declaration also disable narrowing for
 that area. Areas without a manifest retain their existing selection behavior.
 Mail is the first area with feature declarations. Explicit shared-feature entry
 points in `sharedFeatureMappings` use focused cross-page coverage: command-palette
-changes run its command, starring, theme, and settings-dialog specs. This mapping
+changes run its command, starring, theme, and settings-dialog specs; bulk-run
+banner changes run the bulk-processing spec. This mapping
 does not extend to those entry points' imported foundations. Missing target specs
 fall back to broad coverage, and other files in the PR still add their own tests.
 
-On PRs, UI dependencies under `utils/` and `lib/` also trigger selection; unrelated
+UI dependencies under `utils/` and `lib/` also trigger selection; unrelated
 utilities with no connection to tested routes are skipped. Unit-test changes
 alone do not select browser tests.
-Shared Playwright setup and configuration changes use the full suite. Pushes to
-`main`, scheduled runs, and manual runs also keep the full suite as a backstop.
+Shared Playwright setup and configuration changes use the full suite. Weekly
+scheduled runs, manual runs, and pushes without a usable baseline also keep the
+full suite as a backstop. A normal push compares its entire commit range using
+GitHub's before SHA, so it does not silently fall back to every browser test.
 
 Run `node apps/web/scripts/measure-playwright-selection.mjs` from the repository
 root to record selected spec counts for representative changes. An optional
