@@ -43,6 +43,21 @@ describe("emulated Playwright suite selection", () => {
     ]);
   });
 
+  test.each([
+    "app/(app)/BulkRunMonitor.tsx",
+    "store/bulk-run-panel.ts",
+    "utils/bulk-rules/notice.ts",
+  ])("selects only bulk processing coverage for %s", (file) => {
+    const selection = selectChangedPlaywrightTargets(
+      `apps/web/${file}`,
+      appRoot,
+    );
+    expect(selection.runFullSuite).toBe(false);
+    expect(selection.targetFiles).toEqual([
+      "__tests__/playwright/emulated/automation/bulk-processing.spec.ts",
+    ]);
+  });
+
   test("unions shared-feature coverage with other changes in the same PR", () => {
     const selection = selectChangedPlaywrightTargets(
       [
@@ -371,7 +386,7 @@ describe("emulated Playwright suite selection", () => {
     });
   });
 
-  test("uses the full suite outside pull requests", () => {
+  test("uses the full suite when no change list is available", () => {
     const selection = selectChangedPlaywrightTargets("", appRoot);
 
     expect(selection.runFullSuite).toBe(true);

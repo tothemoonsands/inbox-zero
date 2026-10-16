@@ -73,6 +73,14 @@ const sharedAppEntryFiles = [
 const sharedFeatureMappings = [
   {
     files: [
+      "app/(app)/BulkRunMonitor.tsx",
+      "store/bulk-run-panel.ts",
+      "utils/bulk-rules/notice.ts",
+    ],
+    targets: ["automation/bulk-processing.spec.ts"],
+  },
+  {
+    files: [
       "components/CommandK.tsx",
       "hooks/useCommandPaletteCommands.ts",
       "store/command-palette.ts",
@@ -148,7 +156,7 @@ export function selectChangedPlaywrightTargets(changedFilesInput, appRoot) {
   if (!changedFilesInput?.trim()) {
     return {
       runFullSuite: true,
-      reason: "No pull-request change list was provided.",
+      reason: "No change list was provided; running the full browser suite.",
       targetFiles: [],
     };
   }
@@ -276,7 +284,7 @@ export function selectChangedPlaywrightTargets(changedFilesInput, appRoot) {
     return {
       runFullSuite: false,
       reason: targetFiles.size
-        ? `Selected E2E features and fallback areas from the pull request's changed files.${sharedFeatureReason}${uncoveredReason}`
+        ? `Selected E2E features and fallback areas from the changed files.${sharedFeatureReason}${uncoveredReason}`
         : `The changed files do not affect emulated browser coverage.${uncoveredReason}`,
       targetFiles: [...targetFiles],
     };
@@ -285,7 +293,7 @@ export function selectChangedPlaywrightTargets(changedFilesInput, appRoot) {
   return {
     runFullSuite: false,
     reason: targetFiles.size
-      ? "Selected E2E areas from the pull request's changed files."
+      ? "Selected E2E areas from the changed files."
       : "The changed files do not affect emulated browser coverage.",
     targetFiles: [...targetFiles],
   };
@@ -479,6 +487,7 @@ function isFullSuiteFile({ repoPath, appPath }) {
     repoPath === "apps/web/package.json" ||
     repoPath === "pnpm-lock.yaml" ||
     repoPath === "scripts/pnpm-install-without-desktop.sh" ||
+    repoPath === "scripts/playwright-changed-files.sh" ||
     repoPath.startsWith("apps/web/next.config.") ||
     repoPath === "apps/web/__tests__/playwright/run-emulated-suite.mjs" ||
     (repoPath.startsWith("apps/web/utils/playwright/") &&
