@@ -8,10 +8,6 @@ name: E2E Flow Tests
 # To disable: Remove the variable or set it to anything other than "true"
 
 on:
-  # Run on schedule (every 12 hours)
-  schedule:
-    - cron: "0 */12 * * *"
-
   # Allow manual trigger with branch selection
   workflow_dispatch:
     inputs:

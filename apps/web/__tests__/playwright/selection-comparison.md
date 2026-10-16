@@ -6,7 +6,8 @@ Pushes now use the same changed-file selection as pull requests. Replaying the
 bulk-processing banner change on the current tree selects 1 spec in 1 browser
 job, compared with 71 specs in 30 browser jobs under the previous full-push
 policy. These are selection counts, not elapsed-time predictions. The full
-suite still runs weekly, manually, and for shared test infrastructure changes.
+suite still runs manually and for shared test infrastructure changes. There are
+no automatic scheduled test runs.
 
 ## Latest main integration
 
@@ -89,7 +90,7 @@ selected specs as well as the count.
 - Invalid manifests, missing feature roots, and new undeclared specs fall back
   to the full area. Other product areas retain their existing routing until
   they declare feature coverage.
-- Weekly scheduled and manual runs retain the full suite. Main-branch pushes
+- Manual runs retain the full suite. Main-branch pushes
   now use the same changed-file selection as pull requests.
 
 ## Replay of recent merged PRs

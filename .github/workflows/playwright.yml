@@ -67,8 +67,6 @@ on:
       - "scripts/playwright-changed-files.sh"
       - ".github/workflows/playwright.yml"
       - ".github/workflows/publish-playwright-report.yml"
-  schedule:
-    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:

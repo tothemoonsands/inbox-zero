@@ -70,7 +70,7 @@ gallery can compare it with `main` and attaches the same image to the full
 Playwright report.
 
 The emulated project runs when browser-facing files change in pull requests or
-on `main`, plus the weekly Monday schedule and manual dispatches. Both pushes
+on `main`, plus manual dispatches. Both pushes
 and pull requests run only the affected product areas and features. The selector traces imports from each
 tested Next.js route and combines those results with explicit product boundaries.
 An area's optional `coverage.json` maps each spec filename to the app-relative
@@ -94,9 +94,9 @@ fall back to broad coverage, and other files in the PR still add their own tests
 UI dependencies under `utils/` and `lib/` also trigger selection; unrelated
 utilities with no connection to tested routes are skipped. Unit-test changes
 alone do not select browser tests.
-Shared Playwright setup and configuration changes use the full suite. Weekly
-scheduled runs, manual runs, and pushes without a usable baseline also keep the
-full suite as a backstop. A normal push compares its entire commit range using
+Shared Playwright setup and configuration changes use the full suite. Manual
+runs and pushes without a usable baseline also keep the full suite as a
+backstop. Test workflows have no automatic scheduled runs. A normal push compares its entire commit range using
 GitHub's before SHA, so it does not silently fall back to every browser test.
 
 Run `node apps/web/scripts/measure-playwright-selection.mjs` from the repository
