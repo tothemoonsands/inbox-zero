@@ -152,23 +152,31 @@ test("keeps a background run visible across navigation and reload", async ({
     await dialog.getByRole("button", { name: "Stop", exact: true }).click();
     await expect(dialog.getByText(/Stopped/)).toBeVisible();
     await page.keyboard.press("Escape");
-    await page
-      .getByRole("button", { name: "Dismiss completed email processing" })
-      .click();
+    await expect(
+      page.getByRole("button", { name: "View progress", exact: true }),
+    ).toBeHidden();
+    await page.screenshot({
+      path: testInfo.outputPath("stopped-run-hidden.png"),
+    });
     await page.reload();
     await expect(
       page.getByRole("button", { name: "View progress", exact: true }),
     ).toBeHidden();
+    await page.goto(`/${emailAccountId}/automation`);
+    await page.getByRole("button", { name: "Process Past Emails" }).click();
+    await expect(dialog.getByText(/Stopped/)).toBeVisible();
+    await expect(dialog.getByText(/1 of 2 processed/)).toBeVisible();
+    await page.keyboard.press("Escape");
     await page.route("**/api/user/bulk-runs", (route) =>
       route.fulfill({
         json: {
           runs: [
             {
               ...runs[0],
-              id: "empty-completed-run",
+              id: "completed-run",
               status: "COMPLETED",
-              total: 0,
-              completed: 0,
+              total: 2,
+              completed: 2,
               failed: 0,
               items: [],
             },
@@ -181,7 +189,7 @@ test("keeps a background run visible across navigation and reload", async ({
       page.getByRole("button", { name: "View progress", exact: true }),
     ).toBeHidden();
     await page.screenshot({
-      path: testInfo.outputPath("empty-completed-runs-hidden.png"),
+      path: testInfo.outputPath("completed-run-hidden.png"),
     });
   } finally {
     await client.query(

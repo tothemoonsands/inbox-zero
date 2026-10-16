@@ -4,18 +4,9 @@ import { useState } from "react";
 import { useAtom } from "jotai";
 import useSWR from "swr";
 import { useAction } from "next-safe-action/hooks";
-import {
-  Loader2Icon,
-  PauseIcon,
-  PlayIcon,
-  SquareIcon,
-  XIcon,
-} from "lucide-react";
+import { Loader2Icon, PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import type { GetBulkRunsResponse } from "@/app/api/user/bulk-runs/route";
-import {
-  bulkRunPanelAtom,
-  dismissedBulkRunsAtom,
-} from "@/store/bulk-run-panel";
+import { bulkRunPanelAtom } from "@/store/bulk-run-panel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,7 +37,6 @@ type Run = GetBulkRunsResponse["runs"][number];
 
 export function BulkRunMonitor() {
   const [panel, setPanel] = useAtom(bulkRunPanelAtom);
-  const [dismissed, setDismissed] = useAtom(dismissedBulkRunsAtom);
   const { data, error, isLoading, mutate } = useSWR<GetBulkRunsResponse>(
     "/api/user/bulk-runs",
     { refreshInterval: 2000 },
@@ -61,61 +51,49 @@ export function BulkRunMonitor() {
     : latest.find((run) => run.emailAccountId === panel.emailAccountId);
   return (
     <>
-      {latest
-        .filter((run) => shouldShowBulkRunNotice(run, dismissed))
-        .map((run) => (
-          <div
-            key={run.id}
-            className="flex items-center justify-between gap-3 border-b bg-muted/50 px-4 py-2"
-            role="status"
+      {latest.filter(shouldShowBulkRunNotice).map((run) => (
+        <div
+          key={run.id}
+          className="flex items-center justify-between gap-3 border-b bg-muted/50 px-4 py-2"
+          role="status"
+        >
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm"
+            onClick={() =>
+              setPanel({
+                open: true,
+                emailAccountId: run.emailAccountId,
+                runId: run.id,
+              })
+            }
           >
-            <button
-              type="button"
-              className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm"
-              onClick={() =>
-                setPanel({
-                  open: true,
-                  emailAccountId: run.emailAccountId,
-                  runId: run.id,
-                })
-              }
-            >
-              {!isBulkRunTerminal(run.status) && run.status !== "PAUSED" && (
-                <Loader2Icon className="size-4 shrink-0 animate-spin" />
-              )}
-              {run.status === "PAUSED" && (
-                <PauseIcon className="size-4 shrink-0" />
-              )}
-              <span className="truncate">
-                <strong>Email processing · {run.emailAccount.email}</strong> —{" "}
-                {describeRun(run)}
-              </span>
-            </button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                setPanel({
-                  open: true,
-                  emailAccountId: run.emailAccountId,
-                  runId: run.id,
-                })
-              }
-            >
-              View progress
-            </Button>
-            {isBulkRunTerminal(run.status) && (
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label="Dismiss completed email processing"
-                onClick={() => setDismissed((ids) => [...ids, run.id])}
-              >
-                <XIcon className="size-4" />
-              </Button>
+            {!isBulkRunTerminal(run.status) && run.status !== "PAUSED" && (
+              <Loader2Icon className="size-4 shrink-0 animate-spin" />
             )}
-          </div>
-        ))}
+            {run.status === "PAUSED" && (
+              <PauseIcon className="size-4 shrink-0" />
+            )}
+            <span className="truncate">
+              <strong>Email processing · {run.emailAccount.email}</strong> —{" "}
+              {describeRun(run)}
+            </span>
+          </button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              setPanel({
+                open: true,
+                emailAccountId: run.emailAccountId,
+                runId: run.id,
+              })
+            }
+          >
+            View progress
+          </Button>
+        </div>
+      ))}
       <Dialog
         open={panel.open}
         onOpenChange={(open) => setPanel((value) => ({ ...value, open }))}
