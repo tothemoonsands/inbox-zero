@@ -54,6 +54,28 @@ export async function readGoogleCorrections({
   targets: Record<string, string>;
   now: number;
 }) {
+  // Sweep Spam independently of history so Gmail-filtered arrivals and old unread mail are covered.
+  const unreadSpam = await api.users.messages.list(
+    {
+      userId: "me",
+      labelIds: ["SPAM", "UNREAD"],
+      includeSpamTrash: true,
+      maxResults: 500,
+    },
+    { timeout: 20_000, retry: false },
+  );
+  const unreadIds = (unreadSpam.data.messages ?? [])
+    .map((message) => message.id)
+    .filter((id): id is string => !!id);
+  if (unreadIds.length)
+    await api.users.messages.batchModify(
+      {
+        userId: "me",
+        requestBody: { ids: unreadIds, removeLabelIds: ["UNREAD"] },
+      },
+      { timeout: 20_000, retry: false },
+    );
+
   if (!state.historyId) {
     state.historyId =
       (

@@ -20,6 +20,8 @@ const empty = (): ObservationState => ({ observed: {}, pending: {} });
 function google() {
   const profile = vi.fn().mockResolvedValue({ data: { historyId: "10" } });
   const history = vi.fn().mockResolvedValue({ data: { historyId: "20" } });
+  const list = vi.fn().mockResolvedValue({ data: { messages: [] } });
+  const batchModify = vi.fn().mockResolvedValue({});
   const get = vi.fn().mockResolvedValue({
     data: {
       id: "m",
@@ -37,12 +39,14 @@ function google() {
   return {
     profile,
     history,
+    list,
+    batchModify,
     get,
     api: {
       users: {
         getProfile: profile,
         history: { list: history },
-        messages: { get },
+        messages: { get, list, batchModify },
       },
     } as unknown as gmail_v1.Gmail,
   };
@@ -53,6 +57,72 @@ const moved = {
 };
 
 describe("Gmail correction history", () => {
+  it("marks Gmail-filtered spam read on initial and subsequent scans", async () => {
+    const g = google();
+    const state = googleStateSchema.parse({});
+    g.list.mockResolvedValue({
+      data: { messages: [{ id: "spam-1" }, { id: "spam-2" }] },
+    });
+    const scan = () =>
+      readGoogleCorrections({
+        api: g.api,
+        state,
+        observations: empty(),
+        targets,
+        now: 100,
+      });
+
+    await scan();
+    await scan();
+
+    expect(g.list).toHaveBeenCalledWith(
+      {
+        userId: "me",
+        labelIds: ["SPAM", "UNREAD"],
+        includeSpamTrash: true,
+        maxResults: 500,
+      },
+      { timeout: 20_000, retry: false },
+    );
+    expect(g.batchModify).toHaveBeenCalledTimes(2);
+    expect(g.batchModify).toHaveBeenCalledWith(
+      {
+        userId: "me",
+        requestBody: { ids: ["spam-1", "spam-2"], removeLabelIds: ["UNREAD"] },
+      },
+      { timeout: 20_000, retry: false },
+    );
+  });
+  it("does not write when Spam has no unread messages", async () => {
+    const g = google();
+    await readGoogleCorrections({
+      api: g.api,
+      state: googleStateSchema.parse({}),
+      observations: empty(),
+      targets,
+      now: 100,
+    });
+    expect(g.batchModify).not.toHaveBeenCalled();
+  });
+  it("retries failed Spam cleanup without advancing the history checkpoint", async () => {
+    const g = google();
+    const state = googleStateSchema.parse({ historyId: "10" });
+    g.list.mockResolvedValue({ data: { messages: [{ id: "spam-1" }] } });
+    g.batchModify.mockRejectedValueOnce(new Error("Temporary failure"));
+    const scan = () =>
+      readGoogleCorrections({
+        api: g.api,
+        state,
+        observations: empty(),
+        targets,
+        now: 100,
+      });
+    await expect(scan()).rejects.toThrow("Temporary failure");
+    expect(state.historyId).toBe("10");
+    await scan();
+    expect(g.batchModify).toHaveBeenCalledTimes(2);
+    expect(state.historyId).toBe("20");
+  });
   it.each([
     "UNREAD",
     "STARRED",
