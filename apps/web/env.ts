@@ -188,6 +188,12 @@ const parsedEnv = createEnv({
     OPENAI_COMPATIBLE_BASE_URL: z.string().optional(),
     OPENAI_COMPATIBLE_MODEL: z.string().optional(),
     OPENAI_COMPATIBLE_HEADERS: z.string().optional(),
+    OPENAI_COMPATIBLE_REASONING_BUDGET: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(32_768)
+      .optional(),
     OPENAI_COMPATIBLE_AUTH_HEADER: z
       .enum(["authorization", "api-key"])
       .optional(),

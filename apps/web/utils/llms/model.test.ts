@@ -159,6 +159,7 @@ describe("Models", () => {
     vi.mocked(env).OPENAI_COMPATIBLE_MODEL = "llama-3.2-3b-instruct";
     vi.mocked(env).OPENAI_COMPATIBLE_AUTH_HEADER = undefined;
     vi.mocked(env).OPENAI_COMPATIBLE_HEADERS = undefined;
+    vi.mocked(env).OPENAI_COMPATIBLE_REASONING_BUDGET = undefined;
     vi.mocked(env).CLI_LLM_ENABLED = false;
     vi.mocked(env).CODEX_CLI_ALLOW_NPX = false;
     vi.mocked(env).CODEX_CLI_PATH = undefined;
@@ -1393,6 +1394,116 @@ describe("Models", () => {
             : {}),
         }),
       );
+    });
+
+    it.each([
+      ["draft", 16_384, 8192],
+      ["chat", 16_384, 8192],
+      ["default", undefined, undefined],
+      ["economy", undefined, undefined],
+      ["nano", undefined, undefined],
+    ] as const)("applies opt-in reasoning headroom to %s requests without changing other roles", async (role, total, budget) => {
+      const actual = await vi.importActual<
+        typeof import("@ai-sdk/openai-compatible")
+      >("@ai-sdk/openai-compatible");
+      const fetcher = vi.fn(async () =>
+        Response.json({
+          id: "synthetic",
+          object: "chat.completion",
+          created: 1,
+          model: "Qwen3.8-Flash-Next-oQ4e-mtp",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "OK" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+      );
+      vi.mocked(createOpenAICompatible).mockImplementationOnce((options) =>
+        actual.createOpenAICompatible({ ...options, fetch: fetcher }),
+      );
+      for (const key of [
+        "DEFAULT_LLMS",
+        "ECONOMY_LLMS",
+        "NANO_LLMS",
+        "DRAFT_LLMS",
+        "CHAT_LLMS",
+      ] as const) {
+        vi.mocked(env)[key] = "openai-compatible:Qwen3.8-Flash-Next-oQ4e-mtp";
+      }
+      vi.mocked(env).OPENAI_COMPATIBLE_REASONING_BUDGET = 8192;
+      await generateText({
+        model: getModel(defaultUserAi(), role).model,
+        prompt: "Reply OK",
+        maxRetries: 0,
+      });
+      const request = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+      const body = JSON.parse(request[1].body as string);
+      expect(body.thinking_budget).toBe(budget);
+      expect(body.max_tokens).toBe(total);
+      expect(body.model).toBe("Qwen3.8-Flash-Next-oQ4e-mtp");
+      if (budget) expect(body.reasoning_effort).toBe("medium");
+    });
+
+    it("preserves explicit request budgets and Off, and reserves answer space under smaller output limits", () => {
+      vi.mocked(env).DRAFT_LLMS =
+        "openai-compatible:Qwen3.8-Flash-Next-oQ4e-mtp";
+      vi.mocked(env).OPENAI_COMPATIBLE_REASONING_BUDGET = 8192;
+      getModel(defaultUserAi(), "draft");
+      const transform = vi.mocked(createOpenAICompatible).mock.lastCall?.[0]
+        .transformRequestBody;
+      expect(transform).toBeDefined();
+      const request = {
+        model: "Qwen3.8-Flash-Next-oQ4e-mtp",
+        max_tokens: 4096,
+        stream: true,
+        messages: [{ role: "user", content: "synthetic" }],
+        response_format: { type: "json_object" },
+        tools: [{ type: "function", function: { name: "test" } }],
+      };
+      expect(transform!(request)).toEqual({
+        ...request,
+        thinking_budget: 2048,
+        reasoning_effort: "medium",
+      });
+      for (const controls of [
+        { thinking_budget: 0 },
+        { thinking_budget: 6000 },
+        { thinking_token_budget: 1000 },
+        { thinking: { budget_tokens: 2000 } },
+        { chat_template_kwargs: { thinking_budget: 1000 } },
+        { reasoning_effort: "none" },
+        { reasoning_effort: "off" },
+        { enable_thinking: false },
+        { reasoning: false },
+        { chat_template_kwargs: { enable_thinking: false } },
+      ]) {
+        const explicit = { ...request, ...controls };
+        expect(transform!(explicit)).toBe(explicit);
+      }
+      const completionLimit = {
+        ...request,
+        max_tokens: undefined,
+        max_completion_tokens: 6000,
+      };
+      expect(transform!(completionLimit)).toEqual({
+        ...completionLimit,
+        thinking_budget: 3000,
+        reasoning_effort: "medium",
+      });
+    });
+
+    it("does not apply local reasoning settings to incompatible models", () => {
+      vi.mocked(env).DRAFT_LLMS = "openai-compatible:other-model";
+      vi.mocked(env).OPENAI_COMPATIBLE_REASONING_BUDGET = 8192;
+      getModel(defaultUserAi(), "draft");
+      expect(
+        vi.mocked(createOpenAICompatible).mock.lastCall?.[0]
+          .transformRequestBody,
+      ).toBeUndefined();
     });
 
     it("should send client headers and preserve bearer auth on the SDK request", async () => {

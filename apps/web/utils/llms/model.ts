@@ -291,6 +291,10 @@ function selectModel(
         baseURL,
         supportsStructuredOutputs: true,
         ...getOpenAiCompatibleRequestOptions(openAiCompatibleApiKey),
+        transformRequestBody: getOpenAiCompatibleReasoningTransform(
+          modelType,
+          modelName,
+        ),
       });
       return {
         provider: Provider.OPENAI_COMPATIBLE,
@@ -617,6 +621,65 @@ function getOllamaBaseUrl(): string | undefined {
   }
 
   return baseURL.replace(/\/+$/, "");
+}
+
+function getOpenAiCompatibleReasoningTransform(
+  modelType: ModelType,
+  modelName: string,
+) {
+  const budget = env.OPENAI_COMPATIBLE_REASONING_BUDGET;
+  if (
+    !budget ||
+    (modelType !== "draft" && modelType !== "chat") ||
+    !/(?:^|\/)(?:qwen3\.(?:8|6)-|deepseek-v4)/i.test(modelName)
+  )
+    return;
+
+  return (body: Record<string, unknown>) => {
+    const template = body.chat_template_kwargs as
+      | Record<string, unknown>
+      | undefined;
+    const thinking = body.thinking as Record<string, unknown> | undefined;
+    const reasoning = body.reasoning as
+      | Record<string, unknown>
+      | false
+      | undefined;
+    const effort =
+      (typeof reasoning === "object" ? reasoning?.effort : undefined) ??
+      body.reasoning_effort;
+    if (
+      body.thinking_budget != null ||
+      body.thinking_token_budget != null ||
+      thinking?.budget_tokens != null ||
+      template?.thinking_budget != null ||
+      body.enable_thinking === false ||
+      template?.enable_thinking === false ||
+      reasoning === false ||
+      effort === "none" ||
+      effort === "off"
+    )
+      return body;
+    const total =
+      body.max_completion_tokens ??
+      body.max_output_tokens ??
+      body.max_tokens ??
+      budget * 2;
+    if (typeof total !== "number" || !Number.isInteger(total) || total < 1)
+      return body;
+    const key = modelName.toLowerCase().includes("splash")
+      ? "thinking_token_budget"
+      : "thinking_budget";
+    return {
+      ...body,
+      ...(body.max_tokens == null &&
+      body.max_completion_tokens == null &&
+      body.max_output_tokens == null
+        ? { max_tokens: total }
+        : {}),
+      [key]: Math.min(budget, Math.floor(total / 2)),
+      reasoning_effort: effort ?? "medium",
+    };
+  };
 }
 
 function getOpenAiCompatibleRequestOptions(apiKey: string | undefined) {
