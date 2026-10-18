@@ -111,12 +111,15 @@ const FORWARDED_CONTENT_PATTERNS = [
   /(?:\r?\n|\r)?Original Message/i,
 ];
 
-export function stripForwardedContent(text: string): string {
+export function stripForwardedContent(
+  text: string,
+  preserveJoiners = false,
+): string {
   for (const pattern of FORWARDED_CONTENT_PATTERNS) {
     const parts = text.split(pattern);
     if (parts.length > 1) {
       // Take content before the forward marker and clean it
-      return removeExcessiveWhitespace(parts[0]);
+      return removeExcessiveWhitespace(parts[0], { preserveJoiners });
     }
   }
 
@@ -131,6 +134,7 @@ export type EmailToContentOptions = {
   stripSignature?: boolean;
   includeLinkUrls?: boolean;
   includeImageAltText?: boolean;
+  preserveJoiners?: boolean;
 };
 
 export function emailToContent(
@@ -143,6 +147,7 @@ export function emailToContent(
     stripSignature = false,
     includeLinkUrls = false,
     includeImageAltText = false,
+    preserveJoiners = false,
   }: EmailToContentOptions = {},
 ): string {
   let content = "";
@@ -166,14 +171,14 @@ export function emailToContent(
   }
 
   if (removeForwarded) {
-    content = stripForwardedContent(content);
+    content = stripForwardedContent(content, preserveJoiners);
   }
 
   if (stripSignature) {
     content = stripPlainTextSignature(content);
   }
 
-  content = removeExcessiveWhitespace(content);
+  content = removeExcessiveWhitespace(content, { preserveJoiners });
 
   if (!maxLength) return content;
   if (keepTailLength) {

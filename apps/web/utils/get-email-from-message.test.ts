@@ -26,10 +26,10 @@ function makeParsedMessage(
 describe("getEmailForLLM", () => {
   it("strips zero-width characters from plain text", () => {
     const msg = makeParsedMessage({
-      textPlain: "Hello\u200B \u200Cworld\u200D\u2060\uFEFF",
+      textPlain: "Hello\u200B world\u2060\uFEFF",
     });
     const result = getEmailForLLM(msg);
-    expect(result.content).not.toMatch(/\u200B|\u200C|\u200D|\u2060|\uFEFF/);
+    expect(result.content).not.toMatch(/\u200B|\u2060|\uFEFF/);
     expect(result.content).toContain("Hello");
     expect(result.content).toContain("world");
   });
@@ -150,6 +150,84 @@ describe("getEmailForLLM", () => {
     });
     const result = getEmailForLLM(msg);
     expect(result.content).toContain("Normal email content here");
+  });
+
+  it.each([
+    "<span hidden>unseen payload</span>",
+    '<span style="opacity:0">unseen payload</span>',
+    '<span style="mso-hide:all">unseen payload</span>',
+    '<style>.concealed { display: none }</style><span class="concealed">unseen payload</span>',
+    '<style>#concealed { opacity: 0 !important }</style><span id="concealed" style="opacity:1">unseen payload</span>',
+    '<span style="color:#fff;background-color:white">unseen payload</span>',
+    '<div style="background-color:#ffffff"><span style="color:rgb(255, 255, 255)">unseen payload</span></div>',
+    '<span style="color:transparent">unseen payload</span>',
+    '<span style="opacity:0/* hidden */">unseen payload</span>',
+    '<span style="d\\69splay:n\\6f ne">unseen payload</span>',
+  ])("excludes non-visible content from AI input: %s", (html) => {
+    const message = makeParsedMessage({
+      textHtml: `<p>Visible message</p>${html}`,
+    });
+    expect(getEmailForLLM(message).content).toBe("Visible message");
+  });
+
+  it.each([
+    '<style>.content { display: none } .content { display: block }</style><p class="content">Visible message</p>',
+    '<style>.content { display: none }</style><p class="content" style="display:block">Visible message</p>',
+    '<style>#content { display: block } .content { display: none }</style><p id="content" class="content">Visible message</p>',
+    "<style>@media (max-width: 1px) { p { display: none } }</style><p>Visible message</p>",
+    '<p style="background-color:#222;color:white">Visible message</p>',
+    '<p style="background-color:white;background-image:url(https://example.com/background.png);color:white">Visible message</p>',
+    '<style>.content { display:none } @media (max-width:600px) { .content { display:block } }</style><p class="content">Visible message</p>',
+    '<div style="visibility:hidden">Hidden <span style="visibility:visible">Visible message</span></div>',
+  ])("preserves visible content with CSS overrides: %s", (html) => {
+    expect(getEmailForLLM(makeParsedMessage({ textHtml: html })).content).toBe(
+      "Visible message",
+    );
+  });
+
+  it("preserves language joiners and emoji while removing Unicode tag payloads", () => {
+    const languageText = "می\u200Cروم 👩\u200D💻";
+    const payload = String.fromCodePoint(
+      0xe_00_01,
+      0xe_00_41,
+      0xe_00_42,
+      0xe_00_7f,
+    );
+    const flag =
+      "🏴" +
+      String.fromCodePoint(
+        0xe_00_67,
+        0xe_00_62,
+        0xe_00_65,
+        0xe_00_6e,
+        0xe_00_67,
+        0xe_00_7f,
+      );
+    const result = getEmailForLLM(
+      makeParsedMessage({ textPlain: `${languageText} ${payload} ${flag}` }),
+    );
+    expect(result.content).toBe(`${languageText} ${flag}`);
+  });
+
+  it("leaves the original message intact for spam scoring and display", () => {
+    const message = makeParsedMessage({
+      textHtml: "<p>Visible</p><!-- payload --><span hidden>secret</span>",
+      textPlain: "Original\u200B text",
+      snippet: "Original\u2060 snippet",
+    });
+    const original = structuredClone(message);
+    getEmailForLLM(message);
+    expect(message).toEqual(original);
+  });
+
+  it("does not expose encoded image data or erase ordinary encoded text", () => {
+    const message = makeParsedMessage({
+      textHtml:
+        '<p>Reference: SGVsbG8=</p><img src="data:image/png;base64,cGF5bG9hZA==" alt="Receipt" />',
+    });
+    expect(getEmailForLLM(message, { includeImageAltText: true }).content).toBe(
+      "Reference: SGVsbG8=\n\n[image: Receipt]",
+    );
   });
 
   it("strips hidden characters from snippet fallback content", () => {

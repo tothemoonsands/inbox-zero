@@ -2,6 +2,8 @@
 
 This server-side Bayesian gate runs before incoming-message AI processing, including webhooks, catch-up, and bulk rule runs. It uses a user-owned model across opted-in accounts. Explicit user Junk moves train the model; automatic moves do not. Each new training record stores its contribution so changing the label retracts that contribution first. Imported aggregate training remains a preserved baseline; missing historical feature vectors cannot be exactly untrained.
 
+Spam feature extraction receives the original parsed message. The separate LLM content sanitizer removes hidden HTML and invisible Unicode payloads only from the model-facing copy, preserving the original evidence for spam scoring, training, and email display. Its CSS handling is conservative: responsive or theme-dependent visibility and image backgrounds are not assumed invisible. Sanitization and a non-spam verdict do not make email instructions trusted; action authorization and output review remain separate controls.
+
 ## Importing an existing corpus
 
 Keep the source application and a private, consistent snapshot until migration and fresh-mail testing succeed. Never commit a corpus, exported bundle, source message, or personal account identifier.

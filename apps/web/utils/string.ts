@@ -57,14 +57,20 @@ export function trimToNonEmptyString(value: unknown): string | undefined {
   return trimmedValue.length > 0 ? trimmedValue : undefined;
 }
 
-export function removeExcessiveWhitespace(str: string) {
+export function removeExcessiveWhitespace(
+  str: string,
+  { preserveJoiners = false }: { preserveJoiners?: boolean } = {},
+) {
   return (
     str
       // First remove all zero-width spaces, soft hyphens, and other invisible characters
       // Handle each special character separately to avoid combining character issues
       .replace(
         /\u200B|\u200C|\u200D|\u200E|\u200F|\uFEFF|\u3164|\u00AD|\u034F/g,
-        " ",
+        (character) =>
+          preserveJoiners && (character === "\u200C" || character === "\u200D")
+            ? character
+            : " ",
       )
       // Normalize all types of line breaks to \n
       .replace(/\r\n|\r/g, "\n")
