@@ -16,6 +16,7 @@ import type { ReplyContextCollectorResult } from "@/utils/ai/reply/reply-context
 import type { CalendarAvailabilityContext } from "@/utils/ai/calendar/availability";
 import { DraftReplyConfidence } from "@/generated/prisma/enums";
 import { env } from "@/env";
+import { withInferenceLearningTask } from "@/utils/llms/inference-learning";
 import { normalizeDraftReplyConfidence } from "@/utils/ai/reply/draft-confidence";
 import {
   createDraftAttributionTracker,
@@ -354,6 +355,12 @@ export type DraftReplyResult = {
 };
 
 export async function aiDraftReplyWithConfidence(
+  input: DraftReplyInput,
+): Promise<DraftReplyResult> {
+  return withInferenceLearningTask(() => draftReplyWithConfidence(input));
+}
+
+async function draftReplyWithConfidence(
   input: DraftReplyInput,
 ): Promise<DraftReplyResult> {
   const {

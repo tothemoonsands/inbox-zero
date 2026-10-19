@@ -1,4 +1,8 @@
 import {
+  createInferenceLearningStream,
+  recordInferenceLearningModelFailure,
+} from "@/utils/llms/inference-learning";
+import {
   APICallError,
   type ModelMessage,
   type Tool,
@@ -54,7 +58,7 @@ import {
   type ResolvedModel,
   type SelectModel,
 } from "@/utils/llms/model";
-import { getModelForUseCase, type LlmUseCase } from "@/utils/llms/use-cases";
+import { getModelForUseCase, LlmUseCase } from "@/utils/llms/use-cases";
 import {
   buildCachedSystemMessages,
   getSystemCacheProviderOptions,
@@ -412,6 +416,7 @@ export function createGenerateText({
       } catch (error) {
         if (error instanceof SafeError) throw error;
 
+        await recordInferenceLearningModelFailure(candidate.modelName);
         if (nextCandidate && shouldFallbackToNextModel(error)) {
           logger.warn("LLM call failed, trying fallback model", {
             label,
@@ -699,6 +704,7 @@ export function createGenerateObject({
           }),
         );
 
+        await recordInferenceLearningModelFailure(candidate.modelName);
         if (nextCandidate && shouldFallbackToNextModel(error)) {
           fallbackFailures.push({
             provider: candidate.provider,
@@ -857,6 +863,7 @@ export async function chatCompletionStream(
         },
       });
     } catch (error) {
+      await recordInferenceLearningModelFailure(candidate.modelName);
       if (nextCandidate && shouldFallbackToNextModel(error)) {
         logger.warn("Chat completion failed, trying fallback model", {
           label,
@@ -1014,14 +1021,25 @@ export async function toolCallAgentStream(options: ToolCallAgentStreamOptions) {
       },
     });
 
+    const learning =
+      options.useCase === LlmUseCase.AssistantChat
+        ? createInferenceLearningStream(options.useCase, abortSignal)
+        : undefined;
     try {
-      return await agent.stream({
-        messages: protectedMessages as ModelMessage[],
-        experimental_transform: smoothStream({ chunking: "word" }),
-        onStepEnd,
-        abortSignal,
-      });
+      const start = () =>
+        agent.stream({
+          messages: protectedMessages as ModelMessage[],
+          experimental_transform: [
+            smoothStream({ chunking: "word" }),
+            ...(learning ? [learning.transform] : []),
+          ],
+          onStepEnd,
+          abortSignal,
+        });
+      return await (learning ? learning.run(start) : start());
     } catch (error) {
+      await learning?.end(abortSignal?.aborted ? "interrupted" : "error");
+      await recordInferenceLearningModelFailure(candidate.modelName);
       if (nextCandidate && shouldFallbackToNextModel(error)) {
         logger.warn("Tool-call stream failed, trying fallback model", {
           label,

@@ -18,6 +18,7 @@ import type { UserAIFields } from "@/utils/llms/types";
 import { createScopedLogger } from "@/utils/logger";
 import { SafeError } from "../error";
 import { assertCliLlmEnabled, createCliLanguageModel } from "./cli-provider";
+import { createInferenceLearningFetch } from "./inference-learning";
 
 const DEFAULT_GOOGLE_THINKING_BUDGET = 128;
 const REASONING_EFFORT_BY_MODEL_TYPE = {
@@ -286,11 +287,13 @@ function selectModel(
       if (!modelName) throw new SafeError("LLM model name is not set");
       const baseURL = getOpenAiCompatibleBaseUrl();
       const openAiCompatibleApiKey = resolveApiKey(aiApiKey, undefined);
+      const learningFetch = createInferenceLearningFetch(baseURL, modelName);
       const openaiCompatible = createOpenAICompatible({
         name: "openai-compatible",
         baseURL,
         supportsStructuredOutputs: true,
         ...getOpenAiCompatibleRequestOptions(openAiCompatibleApiKey),
+        ...(learningFetch ? { fetch: learningFetch } : {}),
       });
       return {
         provider: Provider.OPENAI_COMPATIBLE,

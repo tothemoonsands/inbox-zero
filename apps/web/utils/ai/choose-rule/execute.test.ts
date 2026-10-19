@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { Prisma } from "@/generated/prisma/client";
 import { ActionType, ExecutedRuleStatus } from "@/generated/prisma/enums";
@@ -7,6 +8,10 @@ import prisma from "@/utils/prisma";
 import type { EmailProvider } from "@/utils/email/types";
 import type { ParsedMessage } from "@/utils/types";
 import { createTestLogger } from "@/__tests__/helpers";
+import {
+  createInferenceLearningFetch,
+  withInferenceLearningTask,
+} from "@/utils/llms/inference-learning";
 
 const { envMock } = vi.hoisted(() => ({
   envMock: {
@@ -113,6 +118,59 @@ describe("executeAct", () => {
         sentMessageIds: ["sent-message-1"],
       },
     });
+  });
+
+  it.each([
+    ActionType.REPLY,
+    ActionType.ARCHIVE,
+    ActionType.MOVE_FOLDER,
+    ActionType.DELETE,
+  ])("executes %s once and persists success when learning receipts fail", async (type) => {
+    const events: string[] = [];
+    const providerFetch = createInferenceLearningFetch(
+      "http://127.0.0.1:12345/mail/v1",
+      "synthetic-local-model",
+      async (input, init) => {
+        if (String(input).endsWith("/harness/task")) {
+          const packet = JSON.parse(String(init?.body));
+          events.push(packet.event.type);
+          if (packet.event.type !== "start")
+            throw new Error("Learning unavailable");
+          return Response.json({
+            active: true,
+            taskId: packet.event.taskId,
+            runtimeTaskId: randomUUID(),
+          });
+        }
+        return Response.json({});
+      },
+    )!;
+    mockRunActionFunction.mockResolvedValueOnce({
+      sentMessageIds: ["sent-message-1"],
+    });
+    const result = await withInferenceLearningTask(async () => {
+      await providerFetch("http://127.0.0.1:12345/mail/v1/chat/completions", {
+        headers: { "x-inference-client": "inbox-zero" },
+      });
+      return executeAct({
+        client: mockClient,
+        executedRule: {
+          ...baseExecutedRule,
+          actionItems: [{ id: "action-1", type }],
+        } as any,
+        message,
+        emailAccount,
+        logger,
+      });
+    });
+    expect(result).toBe(ExecutedRuleStatus.APPLIED);
+    expect(mockRunActionFunction).toHaveBeenCalledTimes(1);
+    expect(mockExecutedActionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ executionStatus: "SUCCEEDED" }),
+      }),
+    );
+    expect(events).toEqual(["start", "tool", "end"]);
   });
 
   it("keeps labels but skips archive for protected company senders", async () => {

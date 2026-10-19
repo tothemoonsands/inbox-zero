@@ -64,6 +64,7 @@ import {
   isMessagingChannelActionType,
   isMessagingDraftActionType,
 } from "@/utils/actions/draft-reply";
+import { withInferenceLearningTask } from "@/utils/llms/inference-learning";
 
 const MODULE = "ai/choose-rule";
 
@@ -106,6 +107,31 @@ type RunRulesOptions = {
 };
 
 export async function runRules(
+  options: RunRulesOptions,
+): Promise<RunRulesResult[]> {
+  return withInferenceLearningTask(
+    () => runRulesInTask(options),
+    (results) => {
+      if (
+        results.some((result) => result.status === ExecutedRuleStatus.ERROR)
+      ) {
+        return "error";
+      }
+      if (
+        results.some((result) =>
+          [ExecutedRuleStatus.APPLYING, ExecutedRuleStatus.PENDING].some(
+            (status) => result.status === status,
+          ),
+        )
+      ) {
+        return;
+      }
+      return "completed";
+    },
+  );
+}
+
+async function runRulesInTask(
   options: RunRulesOptions,
 ): Promise<RunRulesResult[]> {
   if (options.isTest || (!options.draftOnly && !options.beforeRuleExecution)) {

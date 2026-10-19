@@ -22,6 +22,7 @@ import {
   persistExecutedActionOutcome,
 } from "@/utils/ai/executed-action-outcome";
 import { isSendingActionType } from "@/utils/ai/sending-action";
+import { recordInferenceLearningTool } from "@/utils/llms/inference-learning";
 
 const MODULE = "ai-execute-act";
 
@@ -95,6 +96,11 @@ export async function executeAct({
       });
 
       if (isActionResultSkipped(actionResult)) {
+        await recordInferenceLearningTool({
+          tool: action.type,
+          output: { status: "skipped" },
+          isError: false,
+        });
         await persistExecutedActionOutcome({
           actionId: action.id,
           status: ExecutedActionStatus.SKIPPED,
@@ -105,6 +111,11 @@ export async function executeAct({
       }
 
       const actionResultError = getActionResultError(action.type, actionResult);
+      await recordInferenceLearningTool({
+        tool: action.type,
+        output: actionResult,
+        isError: Boolean(actionResultError),
+      });
       if (actionResultError) {
         actionFailures.push({
           type: action.type,
@@ -144,6 +155,11 @@ export async function executeAct({
         });
       }
     } catch (error) {
+      await recordInferenceLearningTool({
+        tool: action.type,
+        output: { status: "failed" },
+        isError: true,
+      });
       await persistExecutedActionOutcome({
         actionId: action.id,
         status: ExecutedActionStatus.FAILED,
