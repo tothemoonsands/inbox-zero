@@ -1,7 +1,9 @@
+import { InvalidToolInputError } from "ai";
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   createInferenceLearningFetch,
+  createInferenceLearningStream,
   recordInferenceLearningTool,
   recordInferenceLearningValidation,
   recordInferenceLearningModelFailure,
@@ -396,4 +398,74 @@ it("named validators report failed checks without promoting network success or o
     validator: "inbox_object_v1",
     passed: false,
   });
+});
+
+it("grades SDK argument rejection but not unchecked dynamic tools", async () => {
+  const packets: Array<{ event: { validation?: { passed: boolean } } }> = [];
+  const transport: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/harness/task")) {
+      const body = JSON.parse(String(init?.body));
+      packets.push(body);
+      return Response.json({
+        active: true,
+        taskId: body.event.taskId,
+        runtimeTaskId: randomUUID(),
+      });
+    }
+    return Response.json({});
+  };
+  const stream = createInferenceLearningStream("fixture");
+  const providerFetch = createInferenceLearningFetch(
+    baseURL,
+    model,
+    transport,
+  )!;
+  await stream.run(() =>
+    providerFetch(`${baseURL}/chat/completions`, {
+      headers: { "x-inference-client": "inbox-zero" },
+    }),
+  );
+  const transform = stream.transform({ tools: {}, stopStream: () => {} });
+  const chunks = [
+    {
+      type: "tool-call" as const,
+      toolCallId: "invalid",
+      toolName: "read",
+      input: { path: 7 },
+      dynamic: true as const,
+      invalid: true as const,
+      error: new InvalidToolInputError({
+        toolName: "read",
+        toolInput: '{"path":7}',
+        cause: new Error("schema"),
+      }),
+    },
+    {
+      type: "tool-call" as const,
+      toolCallId: "unchecked",
+      toolName: "remote",
+      input: {},
+      dynamic: true as const,
+    },
+    {
+      type: "tool-call" as const,
+      toolCallId: "valid",
+      toolName: "read",
+      input: { path: "fixture" },
+    },
+  ];
+  const input = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  const received = [];
+  for await (const chunk of input.pipeThrough(transform)) received.push(chunk);
+  expect(received).toEqual(chunks);
+  expect(
+    packets
+      .filter((p) => p.event.validation)
+      .map((p) => p.event.validation?.passed),
+  ).toEqual([false, true]);
 });

@@ -74,22 +74,22 @@ export function createInferenceLearningStream(
         controller.enqueue(chunk);
         await task.run(async () => {
           if (chunk.type === "tool-call") {
-            if (chunk.dynamic || chunk.providerExecuted) return;
-            if (!("invalid" in chunk) || !chunk.invalid) {
+            if ("invalid" in chunk && chunk.invalid) {
+              if (
+                InvalidToolInputError.isInstance(chunk.error) ||
+                NoSuchToolError.isInstance(chunk.error)
+              ) {
+                await recordInferenceLearningValidation(
+                  "tool_contract",
+                  "inbox_tool_input_v1",
+                  false,
+                );
+              }
+            } else if (!chunk.dynamic && !chunk.providerExecuted) {
               await recordInferenceLearningValidation(
                 "tool_contract",
                 "inbox_tool_input_v1",
                 true,
-              );
-            } else if (
-              "error" in chunk &&
-              (InvalidToolInputError.isInstance(chunk.error) ||
-                NoSuchToolError.isInstance(chunk.error))
-            ) {
-              await recordInferenceLearningValidation(
-                "tool_contract",
-                "inbox_tool_input_v1",
-                false,
               );
             }
           } else if (
