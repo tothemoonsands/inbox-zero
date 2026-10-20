@@ -592,14 +592,18 @@ export function createGenerateObject({
 
       try {
         result = await generateObject<SCHEMA, OUTPUT, RESULT>(request);
-        await recordInferenceLearningValidation(
-          "output_schema",
-          "inbox_object_v1",
-          true,
-          candidate.modelName,
-        );
+        if ("schema" in options && options.schema) {
+          await recordInferenceLearningValidation(
+            "output_schema",
+            "inbox_object_v1",
+            true,
+            candidate.modelName,
+          );
+        }
       } catch (error) {
         if (
+          "schema" in options &&
+          options.schema &&
           NoObjectGeneratedError.isInstance(error) &&
           (TypeValidationError.isInstance(error.cause) ||
             JSONParseError.isInstance(error.cause))

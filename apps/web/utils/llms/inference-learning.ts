@@ -74,6 +74,7 @@ export function createInferenceLearningStream(
         controller.enqueue(chunk);
         await task.run(async () => {
           if (chunk.type === "tool-call") {
+            if (chunk.dynamic || chunk.providerExecuted) return;
             if (!("invalid" in chunk) || !chunk.invalid) {
               await recordInferenceLearningValidation(
                 "tool_contract",
