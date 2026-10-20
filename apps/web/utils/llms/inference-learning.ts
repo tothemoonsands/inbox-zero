@@ -1,6 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import type { StreamTextTransform, ToolSet } from "ai";
+import {
+  InvalidToolInputError,
+  NoSuchToolError,
+  type StreamTextTransform,
+  type ToolSet,
+} from "ai";
 
 type Outcome = "completed" | "error" | "interrupted";
 type Task = {
@@ -68,7 +73,28 @@ export function createInferenceLearningStream(
       async transform(chunk, controller) {
         controller.enqueue(chunk);
         await task.run(async () => {
-          if (chunk.type === "tool-result" || chunk.type === "tool-error") {
+          if (chunk.type === "tool-call") {
+            if (!("invalid" in chunk) || !chunk.invalid) {
+              await recordInferenceLearningValidation(
+                "tool_contract",
+                "inbox_tool_input_v1",
+                true,
+              );
+            } else if (
+              "error" in chunk &&
+              (InvalidToolInputError.isInstance(chunk.error) ||
+                NoSuchToolError.isInstance(chunk.error))
+            ) {
+              await recordInferenceLearningValidation(
+                "tool_contract",
+                "inbox_tool_input_v1",
+                false,
+              );
+            }
+          } else if (
+            chunk.type === "tool-result" ||
+            chunk.type === "tool-error"
+          ) {
             await recordInferenceLearningTool({
               tool: chunk.toolName,
               output:
@@ -177,6 +203,33 @@ export async function recordInferenceLearningModelFailure(
     [...scope.tasks.values()].map(async (pending) => {
       const task = await pending;
       if (task && task.model === model) task.failed = true;
+    }),
+  );
+}
+
+export async function recordInferenceLearningValidation(
+  kind: "output_schema" | "tool_contract",
+  validator: "inbox_object_v1" | "inbox_tool_input_v1",
+  passed: boolean,
+  model?: string,
+): Promise<void> {
+  const scope = scopes.getStore();
+  if (!scope || scope.closed) return;
+  await Promise.all(
+    [...scope.tasks.values()].map(async (pending) => {
+      const task = await pending;
+      if (task && !task.failed && (!model || task.model === model)) {
+        await sendEvent(task, {
+          type: "tool",
+          stage: "validation",
+          validation: {
+            version: 2,
+            kind,
+            validator,
+            passed,
+          },
+        });
+      }
     }),
   );
 }

@@ -23,6 +23,7 @@ vi.mock("ai", () => ({
   RetryError: { isInstance: () => false },
   NoObjectGeneratedError: { isInstance: mockNoObjectGeneratedErrorIsInstance },
   TypeValidationError: { isInstance: () => false },
+  JSONParseError: { isInstance: () => false },
   ToolLoopAgent: class {},
   generateObject: mockGenerateObject,
   generateText: vi.fn(),

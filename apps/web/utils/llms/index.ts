@@ -1,6 +1,7 @@
 import {
   createInferenceLearningStream,
   recordInferenceLearningModelFailure,
+  recordInferenceLearningValidation,
 } from "@/utils/llms/inference-learning";
 import {
   APICallError,
@@ -24,6 +25,7 @@ import {
   type StopCondition,
   NoObjectGeneratedError,
   TypeValidationError,
+  JSONParseError,
 } from "ai";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { captureAiGeneration } from "@posthog/ai";
@@ -590,7 +592,25 @@ export function createGenerateObject({
 
       try {
         result = await generateObject<SCHEMA, OUTPUT, RESULT>(request);
+        await recordInferenceLearningValidation(
+          "output_schema",
+          "inbox_object_v1",
+          true,
+          candidate.modelName,
+        );
       } catch (error) {
+        if (
+          NoObjectGeneratedError.isInstance(error) &&
+          (TypeValidationError.isInstance(error.cause) ||
+            JSONParseError.isInstance(error.cause))
+        ) {
+          await recordInferenceLearningValidation(
+            "output_schema",
+            "inbox_object_v1",
+            false,
+            candidate.modelName,
+          );
+        }
         if (
           NoObjectGeneratedError.isInstance(error) &&
           error.usage !== undefined

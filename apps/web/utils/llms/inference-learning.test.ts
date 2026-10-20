@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createInferenceLearningFetch,
   recordInferenceLearningTool,
+  recordInferenceLearningValidation,
   recordInferenceLearningModelFailure,
   withInferenceLearningTask,
 } from "./inference-learning";
@@ -348,5 +349,51 @@ describe("local inference learning lifecycle", () => {
     );
     expect(events.map((row) => row.event.type)).toEqual(["start", "end"]);
     expect(events[1].event.outcome).toBe("error");
+  });
+});
+
+it("named validators report failed checks without promoting network success or other models", async () => {
+  const packets: Array<{ event: Record<string, unknown> }> = [];
+  const fetcher = vi.fn(async (input, init) => {
+    if (String(input).endsWith("/harness/task")) {
+      const body = JSON.parse(String(init?.body));
+      packets.push(body);
+      return Response.json({
+        active: true,
+        taskId: body.event.taskId,
+        runtimeTaskId: "10000000-0000-4000-8000-000000000001",
+      });
+    }
+    return Response.json({});
+  }) as unknown as typeof fetch;
+  const learning = createInferenceLearningFetch(
+    "http://127.0.0.1:12345/mail/v1",
+    "fixture",
+    fetcher,
+  )!;
+  await withInferenceLearningTask(async () => {
+    await learning("http://127.0.0.1:12345/mail/v1/chat/completions", {
+      headers: { "x-inference-client": "inbox-zero" },
+    });
+    await recordInferenceLearningValidation(
+      "output_schema",
+      "inbox_object_v1",
+      true,
+      "other-model",
+    );
+    await recordInferenceLearningValidation(
+      "output_schema",
+      "inbox_object_v1",
+      false,
+      "fixture",
+    );
+  });
+  const checks = packets.filter((p) => p.event.validation);
+  expect(checks).toHaveLength(1);
+  expect(checks[0].event.validation).toEqual({
+    version: 2,
+    kind: "output_schema",
+    validator: "inbox_object_v1",
+    passed: false,
   });
 });
