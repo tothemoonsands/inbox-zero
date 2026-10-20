@@ -5,6 +5,7 @@ import {
 } from "@/utils/llms/inference-learning";
 import {
   APICallError,
+  asSchema,
   type ModelMessage,
   type Tool,
   type ToolSet,
@@ -588,6 +589,29 @@ export function createGenerateObject({
         typeof generateObject<SCHEMA, OUTPUT, RESULT>
       >[0];
 
+      let replaySchema: ReturnType<typeof asSchema> | undefined;
+      try {
+        if (
+          "schema" in options &&
+          options.schema &&
+          (!options.output || options.output === "object") &&
+          typeof options.schema !== "function"
+        ) {
+          replaySchema = asSchema(options.schema);
+        }
+      } catch {
+        /* Unsupported optional replay cannot change the original request. */
+      }
+      const replayCheck = async (raw: string): Promise<boolean | null> => {
+        if (!replaySchema?.validate) return null;
+        let value: unknown;
+        try {
+          value = JSON.parse(raw);
+        } catch {
+          return false;
+        }
+        return (await replaySchema.validate(value)).success;
+      };
       let result: GenerateObjectResult<RESULT>;
 
       try {
@@ -598,6 +622,8 @@ export function createGenerateObject({
             "inbox_object_v1",
             true,
             candidate.modelName,
+            replayCheck,
+            result.request?.body,
           );
         }
       } catch (error) {
@@ -613,6 +639,7 @@ export function createGenerateObject({
             "inbox_object_v1",
             false,
             candidate.modelName,
+            replayCheck,
           );
         }
         if (
@@ -1047,7 +1074,18 @@ export async function toolCallAgentStream(options: ToolCallAgentStreamOptions) {
 
     const learning =
       options.useCase === LlmUseCase.AssistantChat
-        ? createInferenceLearningStream(options.useCase, abortSignal)
+        ? createInferenceLearningStream(
+            options.useCase,
+            abortSignal,
+            Object.fromEntries(
+              Object.entries(bridgedAgent.tools ?? {})
+                .filter(
+                  ([, tool]) =>
+                    tool.type !== "dynamic" && tool.type !== "provider",
+                )
+                .map(([name, tool]) => [name, tool.inputSchema]),
+            ),
+          )
         : undefined;
     try {
       const start = () =>

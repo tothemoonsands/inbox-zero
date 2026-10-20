@@ -1,7 +1,10 @@
+import { offerReplay, replayText } from "@/utils/llms/harness-replay";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import {
   InvalidToolInputError,
+  asSchema,
+  type FlexibleSchema,
   NoSuchToolError,
   type StreamTextTransform,
   type ToolSet,
@@ -18,6 +21,8 @@ type Task = {
   fetcher: typeof fetch;
   useCase?: string;
   failed?: boolean;
+  request?: unknown;
+  requestCount?: number;
 };
 type Scope = {
   sessionId: string;
@@ -56,7 +61,57 @@ export async function withInferenceLearningTask<T>(
 export function createInferenceLearningStream(
   useCase: string,
   abortSignal?: AbortSignal,
+  toolSchemas: Record<string, FlexibleSchema<unknown>> = {},
 ) {
+  const schemaChecks = Object.fromEntries(
+    Object.entries(toolSchemas).map(([name, schema]) => {
+      try {
+        return [
+          name,
+          typeof schema === "function" ? undefined : asSchema(schema).validate,
+        ] as const;
+      } catch {
+        return [name, undefined] as const;
+      }
+    }),
+  );
+  const checkTools = async (response: unknown): Promise<boolean | null> => {
+    const value = response as {
+      choices?: {
+        finish_reason?: string;
+        message?: {
+          tool_calls?: {
+            type?: string;
+            function?: { name?: string; arguments?: string };
+          }[];
+        };
+      }[];
+    };
+    if (
+      value?.choices?.length !== 1 ||
+      ["length", "content_filter"].includes(
+        value.choices[0].finish_reason ?? "",
+      )
+    )
+      return null;
+    const calls = value.choices[0].message?.tool_calls;
+    if (!calls?.length) return null;
+    for (const call of calls) {
+      if (call.type !== "function") return null;
+      const name = call.function?.name;
+      if (!name || !Object.hasOwn(schemaChecks, name)) return false;
+      const validate = schemaChecks[name];
+      if (!validate) return null;
+      let input: unknown;
+      try {
+        input = JSON.parse(call.function?.arguments ?? "");
+      } catch {
+        return false;
+      }
+      if (!(await validate(input)).success) return false;
+    }
+    return true;
+  };
   const task = createInferenceLearningTask(useCase);
   let streamOutcome: Outcome | undefined;
   const interrupt = () => {
@@ -83,6 +138,10 @@ export function createInferenceLearningStream(
                   "tool_contract",
                   "inbox_tool_input_v1",
                   false,
+                  undefined,
+                  undefined,
+                  undefined,
+                  checkTools,
                 );
               }
             } else if (!chunk.dynamic && !chunk.providerExecuted) {
@@ -90,6 +149,10 @@ export function createInferenceLearningStream(
                 "tool_contract",
                 "inbox_tool_input_v1",
                 true,
+                undefined,
+                undefined,
+                undefined,
+                checkTools,
               );
             }
           } else if (
@@ -183,6 +246,16 @@ export function createInferenceLearningFetch(
     if (!task || scope.closed) return fetcher(input, init);
     headers.set("x-switchboard-harness-task", task.runtimeTaskId);
     headers.set("x-switchboard-harness-session", task.sessionId);
+    // Capture only the already-serialized request for an accepted local task.
+    // Multiple requests require an explicit SDK request body to avoid ambiguity.
+    task.requestCount = (task.requestCount ?? 0) + 1;
+    if (typeof init?.body === "string") {
+      try {
+        task.request = JSON.parse(init.body);
+      } catch {
+        task.request = undefined;
+      }
+    }
     // The provider owns serialization, retries, streaming and all tool schemas.
     try {
       const response = await fetcher(input, { ...init, headers });
@@ -213,6 +286,9 @@ export async function recordInferenceLearningValidation(
   validator: "inbox_object_v1" | "inbox_tool_input_v1",
   passed: boolean,
   model?: string,
+  check?: (raw: string) => Promise<boolean | null>,
+  requestBody?: unknown,
+  checkResponse?: (response: unknown) => Promise<boolean | null>,
 ): Promise<void> {
   const scope = scopes.getStore();
   if (!scope || scope.closed) return;
@@ -220,16 +296,34 @@ export async function recordInferenceLearningValidation(
     [...scope.tasks.values()].map(async (pending) => {
       const task = await pending;
       if (task && !task.failed && (!model || task.model === model)) {
-        await sendEvent(task, {
-          type: "tool",
-          stage: "validation",
-          validation: {
-            version: 2,
-            kind,
-            validator,
-            passed,
-          },
-        });
+        const validation = { version: 2, kind, validator, passed };
+        let request: unknown;
+        try {
+          request =
+            typeof requestBody === "string"
+              ? JSON.parse(requestBody)
+              : requestBody;
+        } catch {
+          /* Unknown request binding stays ungraded. */
+        }
+        request ??= task.requestCount === 1 ? task.request : undefined;
+        if ((check || checkResponse) && request) {
+          await offerReplay(
+            (event) => sendEvent(task, event),
+            request,
+            validation,
+            (response) => {
+              if (checkResponse) return checkResponse(response);
+              const text = replayText(response);
+              return text === null || !check ? null : check(text);
+            },
+          );
+        } else
+          await sendEvent(task, {
+            type: "tool",
+            stage: "validation",
+            validation,
+          });
       }
     }),
   );
@@ -326,7 +420,7 @@ async function sendEvent(
         const chunk = await reader.read();
         if (chunk.done) break;
         size += chunk.value.byteLength;
-        if (size > MAX_EVENT_BYTES) return null;
+        if (size > 1024 * 1024) return null;
         chunks.push(chunk.value);
       }
     } finally {

@@ -18,7 +18,8 @@ const {
   mockShouldForceNanoModel: vi.fn(),
 }));
 
-vi.mock("ai", () => ({
+vi.mock("ai", async (importOriginal) => ({
+  asSchema: (await importOriginal<typeof import("ai")>()).asSchema,
   APICallError: { isInstance: () => false },
   RetryError: { isInstance: () => false },
   NoObjectGeneratedError: { isInstance: mockNoObjectGeneratedErrorIsInstance },
