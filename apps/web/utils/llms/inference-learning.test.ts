@@ -8,6 +8,8 @@ import {
   recordInferenceLearningValidation,
   recordInferenceLearningModelFailure,
   withInferenceLearningTask,
+  recordInferenceLearningWorkflow,
+  workflowObservation,
 } from "./inference-learning";
 
 const baseURL = "http://127.0.0.1:12345/mail/v1";
@@ -15,6 +17,48 @@ const model = "future-local-model";
 const privateText = "Synthetic private email text";
 
 describe("local inference learning lifecycle", () => {
+  it("keeps verified, pending, skipped and unknown outcomes distinct", () => {
+    expect(workflowObservation("passed")).toEqual({
+      stage: "outcome",
+      status: "passed",
+      reason: "ok",
+    });
+    for (const state of ["pending", "skipped", "unknown"] as const) {
+      expect(workflowObservation(state).status).toBe("not_applicable");
+    }
+    expect(workflowObservation("failed").reason).toBe("outcome_incomplete");
+  });
+
+  it("does not promote partial success after an owner reports a missing result", async () => {
+    const events: { event: { type: string; observation?: unknown } }[] = [];
+    const providerFetch = createInferenceLearningFetch(
+      baseURL,
+      model,
+      async (input, init) => {
+        if (String(input).endsWith("/harness/task")) {
+          const packet = JSON.parse(String(init?.body));
+          events.push(packet);
+          return Response.json({
+            active: true,
+            taskId: packet.event.taskId,
+            runtimeTaskId: randomUUID(),
+          });
+        }
+        return Response.json({});
+      },
+    )!;
+    await withInferenceLearningTask(async () => {
+      await providerFetch(`${baseURL}/responses`, {
+        headers: { "x-inference-client": "inbox-zero" },
+      });
+      await recordInferenceLearningWorkflow("passed");
+      await recordInferenceLearningWorkflow("failed");
+      await recordInferenceLearningWorkflow("passed");
+    });
+    expect(events.at(-1)?.event.observation).toEqual(
+      workflowObservation("failed"),
+    );
+  });
   it("preserves model bodies, schemas, streaming and credentials across a multi-step task", async () => {
     const events: Record<string, unknown>[] = [];
     const requests: RequestInit[] = [];

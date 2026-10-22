@@ -11,6 +11,7 @@ import {
 } from "ai";
 
 type Outcome = "completed" | "error" | "interrupted";
+type WorkflowState = "passed" | "failed" | "pending" | "skipped" | "unknown";
 type Task = {
   client: string;
   model: string;
@@ -29,6 +30,7 @@ type Scope = {
   tasks: Map<string, Promise<Task | null>>;
   closed: boolean;
   useCase?: string;
+  workflow?: WorkflowState;
 };
 
 const scopes = new AsyncLocalStorage<Scope>();
@@ -113,6 +115,7 @@ export function createInferenceLearningStream(
     return true;
   };
   const task = createInferenceLearningTask(useCase);
+  const outstanding = new Set<string>();
   let streamOutcome: Outcome | undefined;
   const interrupt = () => {
     end("interrupted").catch(() => {});
@@ -129,6 +132,11 @@ export function createInferenceLearningStream(
         controller.enqueue(chunk);
         await task.run(async () => {
           if (chunk.type === "tool-call") {
+            if (
+              !("invalid" in chunk && chunk.invalid) &&
+              !chunk.providerExecuted
+            )
+              outstanding.add(chunk.toolCallId);
             if ("invalid" in chunk && chunk.invalid) {
               if (
                 InvalidToolInputError.isInstance(chunk.error) ||
@@ -159,6 +167,7 @@ export function createInferenceLearningStream(
             chunk.type === "tool-result" ||
             chunk.type === "tool-error"
           ) {
+            outstanding.delete(chunk.toolCallId);
             await recordInferenceLearningTool({
               tool: chunk.toolName,
               output:
@@ -174,6 +183,8 @@ export function createInferenceLearningStream(
           } else if (chunk.type === "finish" && !streamOutcome) {
             streamOutcome =
               chunk.finishReason === "stop" ? "completed" : undefined;
+            if (outstanding.size)
+              await recordInferenceLearningWorkflow("failed");
           }
         });
       },
@@ -345,6 +356,36 @@ export async function recordInferenceLearningTool(receipt: {
   );
 }
 
+export async function recordInferenceLearningWorkflow(
+  state: WorkflowState,
+): Promise<void> {
+  const scope = scopes.getStore();
+  if (!scope || scope.closed) return;
+  const rank = { skipped: 0, passed: 1, unknown: 2, pending: 3, failed: 4 };
+  if (!scope.workflow || rank[state] > rank[scope.workflow])
+    scope.workflow = state;
+}
+
+export function workflowObservation(state: WorkflowState) {
+  const reasons = {
+    passed: "ok",
+    failed: "outcome_incomplete",
+    pending: "outcome_pending",
+    skipped: "outcome_skipped",
+    unknown: "outcome_unverified",
+  };
+  return {
+    stage: "outcome",
+    status:
+      state === "passed"
+        ? "passed"
+        : state === "failed"
+          ? "failed"
+          : "not_applicable",
+    reason: reasons[state],
+  };
+}
+
 function createInferenceLearningTask(useCase?: string) {
   const scope: Scope = {
     sessionId: randomUUID(),
@@ -366,6 +407,13 @@ function createInferenceLearningTask(useCase?: string) {
               type: outcome === "interrupted" ? "interrupt" : "end",
               outcome:
                 task.failed && outcome === "completed" ? "error" : outcome,
+              observation: workflowObservation(
+                task.failed || outcome === "error"
+                  ? "failed"
+                  : outcome === "interrupted" || outcome === undefined
+                    ? "pending"
+                    : (scope.workflow ?? "unknown"),
+              ),
             });
         }),
       ).then(() => {

@@ -173,6 +173,56 @@ describe("executeAct", () => {
     expect(events).toEqual(["start", "tool", "end"]);
   });
 
+  it.each([
+    [ActionType.DRAFT_EMAIL, {}, "outcome_unverified"],
+    [ActionType.DRAFT_EMAIL, { draftId: "synthetic-draft" }, "ok"],
+    [ActionType.REPLY, {}, "outcome_unverified"],
+    [ActionType.REPLY, { sentMessageIds: ["synthetic-sent"] }, "ok"],
+  ])("requires a receipt for %s before reporting workflow success", async (type, receipt, reason) => {
+    const observations: unknown[] = [];
+    const providerFetch = createInferenceLearningFetch(
+      "http://127.0.0.1:12345/mail/v1",
+      "synthetic-local-model",
+      async (input, init) => {
+        if (String(input).endsWith("/harness/task")) {
+          const packet = JSON.parse(String(init?.body));
+          if (packet.event.observation)
+            observations.push(packet.event.observation);
+          return Response.json({
+            active: true,
+            taskId: packet.event.taskId,
+            runtimeTaskId: randomUUID(),
+          });
+        }
+        return Response.json({});
+      },
+    )!;
+    mockRunActionFunction.mockResolvedValueOnce(receipt);
+    await withInferenceLearningTask(async () => {
+      await providerFetch("http://127.0.0.1:12345/mail/v1/chat/completions", {
+        headers: { "x-inference-client": "inbox-zero" },
+      });
+      return executeAct({
+        client: mockClient,
+        executedRule: {
+          ...baseExecutedRule,
+          actionItems: [{ id: "action-1", type }],
+        } as any,
+        message,
+        emailAccount,
+        logger,
+      });
+    });
+    expect(mockRunActionFunction).toHaveBeenCalledTimes(1);
+    expect(observations).toEqual([
+      {
+        stage: "outcome",
+        status: reason === "ok" ? "passed" : "not_applicable",
+        reason,
+      },
+    ]);
+  });
+
   it("keeps labels but skips archive for protected company senders", async () => {
     envMock.WHITELIST_FROM = "onboarding@getinboxzero.com";
     mockRunActionFunction.mockResolvedValueOnce({ success: true });

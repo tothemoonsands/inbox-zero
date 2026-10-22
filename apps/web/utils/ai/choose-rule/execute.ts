@@ -22,7 +22,10 @@ import {
   persistExecutedActionOutcome,
 } from "@/utils/ai/executed-action-outcome";
 import { isSendingActionType } from "@/utils/ai/sending-action";
-import { recordInferenceLearningTool } from "@/utils/llms/inference-learning";
+import {
+  recordInferenceLearningTool,
+  recordInferenceLearningWorkflow,
+} from "@/utils/llms/inference-learning";
 
 const MODULE = "ai-execute-act";
 
@@ -76,6 +79,7 @@ export async function executeAct({
           error: null,
           logger: log,
         });
+        await recordInferenceLearningWorkflow("skipped");
         continue;
       }
 
@@ -107,6 +111,7 @@ export async function executeAct({
           error: null,
           logger: log,
         });
+        await recordInferenceLearningWorkflow("skipped");
         continue;
       }
 
@@ -154,7 +159,18 @@ export async function executeAct({
           actionId: action.id,
         });
       }
+      await recordInferenceLearningWorkflow(
+        actionResultError
+          ? "failed"
+          : action.type === ActionType.DRAFT_EMAIL && !draftId
+            ? "unknown"
+            : isSendingActionType(action.type) &&
+                !getSentMessageIds(actionResult).length
+              ? "unknown"
+              : "passed",
+      );
     } catch (error) {
+      await recordInferenceLearningWorkflow("failed");
       await recordInferenceLearningTool({
         tool: action.type,
         output: { status: "failed" },
