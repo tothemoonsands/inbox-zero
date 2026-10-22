@@ -1,4 +1,4 @@
-name: Playwright
+name: Web checks
 
 on:
   push:
@@ -117,7 +117,7 @@ env:
 
 jobs:
   select:
-    name: Select specs and build browser app
+    name: Build web app
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -146,12 +146,16 @@ jobs:
         id: targets
         working-directory: apps/web
         run: |
+          # Everyday CI builds the app; the full browser matrix is opt-in.
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
+            echo 'batches=[]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           batches="$(node __tests__/playwright/run-emulated-suite.mjs --list-batches)"
           batches="$(jq -c '[.[] | . as $batch | $batch + {provider: "google"}, (if any($batch.paths[]; startswith("__tests__/playwright/emulated/mail/")) then $batch + {provider: "microsoft"} else empty end)]' <<< "$batches")"
           echo "batches=$batches" >> "$GITHUB_OUTPUT"
 
-      - name: Build browser app once
-        if: steps.targets.outputs.batches != '[]'
+      - name: Build web app
         run: pnpm -F inbox-zero-ai build:ci
         env:
           NODE_ENV: production

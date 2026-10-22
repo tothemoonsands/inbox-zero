@@ -29,6 +29,7 @@
 - Run the applicable checks from `.github/workflows/test.yml` before pushing: formatting, package types/tests, structural conventions, enum imports, server action exports, client redirects, and fixture hygiene. For schema changes, also run the relevant database tests against a throwaway database.
 - For browser-facing changes, run the selected browser specs and inspect their screenshots. Build only when requested or required by an authorized deployment.
 - Put temporary build output in an already ignored directory and verify it with `git check-ignore` before starting the build, so generated files do not flood the working tree.
+- The full browser matrix is on demand: run the **Web checks** workflow with `workflow_dispatch` when needed. Pushes and PRs run the web build plus the core test workflow. Browser-facing changes still require focused local browser checks.
 - After pushing, inspect Actions for that exact commit and wait for every applicable check to finish. Fix failures and verify the replacement commit; do not treat a successful local build or a successful push as green CI.
 - Deploy only after the pushed commit's applicable CI checks pass, unless the user explicitly requests deployment before CI finishes. Keep local validation, GitHub CI, and deployment health separate in the final report.
 
