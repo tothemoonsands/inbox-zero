@@ -2,7 +2,7 @@ name: publish Playwright report
 
 on:
   workflow_run:
-    workflows: [Playwright]
+    workflows: [Web checks]
     types: [completed]
 
 permissions:
