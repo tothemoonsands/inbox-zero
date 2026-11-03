@@ -7,7 +7,7 @@
 # 3. Separate RUN commands - allows memory to be freed between steps
 # 4. ESLint disabled via next.config.ts (eslint.ignoreDuringBuilds)
 #
-# Memory requirement: ~3GB for webpack build + TypeScript checking
+# Build in an isolated builder with at least 6GB RAM and additional swap.
 # See: https://nextjs.org/docs/app/guides/memory-usage
 
 FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS builder
@@ -63,6 +63,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 # Copy the full repo
 COPY . .
+RUN sed -i 's/enableGlobalVirtualStore: true/enableGlobalVirtualStore: false/' pnpm-workspace.yaml
 
 # === Build environment ===
 ENV NODE_ENV=production
@@ -71,8 +72,8 @@ ENV DOCKER_BUILD=true
 # Standalone output for Docker deployment
 ENV NEXT_PRIVATE_STANDALONE=true
 
-# 3GB for webpack build + TypeScript checking (Turbopack needs 6-8GB+ and frequently OOMs)
-ENV NODE_OPTIONS=--max_old_space_size=3072
+# Bound the webpack heap while leaving room for native allocations.
+ENV NODE_OPTIONS=--max_old_space_size=6144
 
 # Feature flag placeholders
 ARG NEXT_PUBLIC_BASE_URL="http://NEXT_PUBLIC_BASE_URL_PLACEHOLDER"
