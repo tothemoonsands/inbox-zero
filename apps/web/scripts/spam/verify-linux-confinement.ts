@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extractPdf, segmentText } from "../../utils/spam/extractor";
+import { extractPdf } from "../../utils/spam/extractor";
+import { tokenizeWithLanguage } from "../../utils/spam/native-tokenizer";
 import { runIsolatedExtractor } from "../../utils/spam/isolated-process";
 
 if (process.platform !== "linux")
@@ -31,10 +32,12 @@ console.log(JSON.stringify({canary:fs.existsSync(input.canary),environment:!!pro
       proc: false,
       network: false,
     });
-    const tokens = await segmentText([
-      "A synthetic message for confinement verification.",
-    ]);
-    assert.ok(tokens.size === 1);
+    const tokens = await tokenizeWithLanguage((tokenizer) => {
+      tokenizer.words("A synthetic message for confinement verification.");
+      tokenizer.words("日本語の本文です");
+    });
+    assert.ok(tokens.tokens.size > 0);
+    assert.ok(tokens.warnings.has("portable-language-segmentation"));
     const pdf = await extractPdf(
       await readFile(
         join(
@@ -59,7 +62,7 @@ console.log(JSON.stringify({canary:fs.existsSync(input.canary),environment:!!pro
   }
 }
 
-main().catch(() => {
-  console.error("Container verification or startup failed");
+main().catch((error: unknown) => {
+  console.error(error);
   process.exitCode = 1;
 });
