@@ -192,8 +192,7 @@ ${paths.map((path) => `(allow file-read* (literal ${quote(path)}))`).join("\n")}
         "--die-with-parent",
         "--new-session",
         ...bindings,
-        "--proc",
-        "/proc",
+        // Do not expose parent process metadata or require a nested proc mount.
         "--dev",
         "/dev",
         "--tmpfs",
