@@ -137,15 +137,12 @@ RUN --mount=type=cache,target=/app/apps/web/.next/cache \
     node scripts/spam/build-native.mjs && \
     node scripts/build-mcp-app.mjs && \
     ../../node_modules/.bin/next build --webpack && \
-    ../../node_modules/.bin/serwist build serwist.config.mjs && \
-    cd ../.. && \
-    pnpm --filter @inboxzero/worker deploy --legacy --prod /tmp/apps/worker
+    ../../node_modules/.bin/serwist build serwist.config.mjs
 
 # === Production image ===
 FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates bubblewrap procps && rm -rf /var/lib/apt/lists/* && groupadd -g 10001 inboxzero && useradd -u 10001 -g inboxzero -M inboxzero
 COPY --from=builder /app /app
-COPY --from=builder /tmp/apps/worker /app/worker-runtime
 RUN cp -a /app/apps/web/.next/static /app/apps/web/.next/standalone/apps/web/.next/static && cp -a /app/apps/web/public /app/apps/web/.next/standalone/apps/web/public && rm -rf /app/apps/web/.next/cache && mkdir -p /app/apps/web/.next/standalone/apps/web/.next/cache
 WORKDIR /app/apps/web
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
