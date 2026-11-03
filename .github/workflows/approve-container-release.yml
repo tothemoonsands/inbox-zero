@@ -1,0 +1,52 @@
+name: Approve container release
+on:
+  workflow_run:
+    workflows: [Run Tests, Build Check]
+    types: [completed]
+permissions:
+  contents: read
+jobs:
+  approve:
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Require both main-branch workflows to pass for this commit
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$current" != "$RELEASE_SHA" ]; then exit 0; fi
+          for workflow in test.yml build-check.yml; do
+            result=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?head_sha=$RELEASE_SHA&event=push&per_page=10" --jq '.workflow_runs | sort_by(.run_number) | last | .conclusion')
+            if [ "$result" != success ]; then exit 0; fi
+          done
+          echo 'approved=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: steps.gate.outputs.approved == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Sign the CI-approved commit
+        if: steps.gate.outputs.approved == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          key="$RUNNER_TEMP/release-key"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key"
+          tag="deploy-inbox-zero-$(date -u +%Y%m%dT%H%M%SZ)-${RELEASE_SHA:0:12}"
+          git -c gpg.format=ssh -c user.signingkey="$key" -c user.name='Container Release' -c user.email='release@homelab.invalid' tag -s "$tag" "$RELEASE_SHA" -m 'CI-verified deployment approval'
+          git -c 'credential.helper=!gh auth git-credential' push origin "refs/tags/$tag"

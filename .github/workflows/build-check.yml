@@ -7,6 +7,8 @@ on:
   push:
     branches: [main]
     paths:
+      - "docker/**"
+      - ".github/workflows/approve-container-release.yml"
       - "apps/web/**"
       - "packages/**"
       - "package.json"
@@ -20,6 +22,8 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "docker/**"
+      - ".github/workflows/approve-container-release.yml"
       - "apps/web/**"
       - "packages/**"
       - "package.json"

@@ -45,3 +45,9 @@ Dockerfile*
 *.local
 _tmp
 .tmp
+
+# Personal runtime databases and credentials are never build inputs.
+.context
+.codex
+.next-production
+**/.next-production
