@@ -29,11 +29,17 @@ jobs:
             if [ "$result" != success ]; then exit 0; fi
           done
           echo 'approved=true' >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Fetch only the approved commit metadata
         if: steps.gate.outputs.approved == 'true'
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          persist-credentials: false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init --bare "$RUNNER_TEMP/approval.git"
+          git -C "$RUNNER_TEMP/approval.git" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git -C "$RUNNER_TEMP/approval.git" -c 'credential.helper=!gh auth git-credential' fetch --no-tags --depth=1 origin "$RELEASE_SHA"
       - name: Sign the CI-approved commit
         if: steps.gate.outputs.approved == 'true'
         env:
@@ -48,5 +54,5 @@ jobs:
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key"
           tag="deploy-inbox-zero-$(date -u +%Y%m%dT%H%M%SZ)-${RELEASE_SHA:0:12}"
-          git -c gpg.format=ssh -c user.signingkey="$key" -c user.name='Container Release' -c user.email='release@homelab.invalid' tag -s "$tag" "$RELEASE_SHA" -m 'CI-verified deployment approval'
-          git -c 'credential.helper=!gh auth git-credential' push origin "refs/tags/$tag"
+          git -C "$RUNNER_TEMP/approval.git" -c gpg.format=ssh -c user.signingkey="$key" -c user.name='Container Release' -c user.email='release@homelab.invalid' tag -s "$tag" "$RELEASE_SHA" -m 'CI-verified deployment approval'
+          git -C "$RUNNER_TEMP/approval.git" -c 'credential.helper=!gh auth git-credential' push origin "refs/tags/$tag"
